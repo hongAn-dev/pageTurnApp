@@ -1,0 +1,1476 @@
+{
+	"info": {
+		"_postman_id": "d849b61b-f64d-4378-a464-d34eee45a797",
+		"name": "PageTurn Backend API",
+		"description": "Postman collection for the PageTurn backend. Requests are grouped by module and use environment variables so the collection can be imported directly into Postman.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "40607142"
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Register",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\",\n  \"displayName\": \"{{displayName}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/register",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"register"
+							]
+						},
+						"description": "Create a new user account and return access and refresh tokens."
+					},
+					"response": []
+				},
+				{
+					"name": "Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"login"
+							]
+						},
+						"description": "Authenticate a user and return access and refresh tokens."
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/refresh",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"refresh"
+							]
+						},
+						"description": "Rotate the refresh token and issue a new access token."
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/logout",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"logout"
+							]
+						},
+						"description": "Revoke a single refresh token."
+					},
+					"response": []
+				},
+				{
+					"name": "Logout All",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/logout-all",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"logout-all"
+							]
+						},
+						"description": "Revoke all refresh tokens for the current user."
+					},
+					"response": []
+				},
+				{
+					"name": "Me",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"me"
+							]
+						},
+						"description": "Return the authenticated user summary."
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication and token lifecycle endpoints."
+		},
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "Get Current User",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/users/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"me"
+							]
+						},
+						"description": "Get the current authenticated user profile."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"{{updatedUserEmail}}\",\n  \"displayName\": \"{{updatedDisplayName}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/users/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"me"
+							]
+						},
+						"description": "Update email and display name for the current user."
+					},
+					"response": []
+				},
+				{
+					"name": "Search Users By Email",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/users/search?email={{searchEmail}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"search"
+							],
+							"query": [
+								{
+									"key": "email",
+									"value": "{{searchEmail}}"
+								}
+							]
+						},
+						"description": "Search active users by email. Used by the transfer flow."
+					},
+					"response": []
+				}
+			],
+			"description": "Current user profile and safe user search."
+		},
+		{
+			"name": "Library",
+			"item": [
+				{
+					"name": "List Library",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/library",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"library"
+							]
+						},
+						"description": "List all cloud books for the current user."
+					},
+					"response": []
+				},
+				{
+					"name": "Upsert Metadata",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bookHash\": \"{{bookHash}}\",\n  \"title\": \"Sample Book\",\n  \"author\": \"Sample Author\",\n  \"fileFormat\": \"epub\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/library",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"library"
+							]
+						},
+						"description": "Create or update cloud book metadata for the current user."
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Book File",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "{{bookFilePath}}"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/library/{{bookHash}}/upload",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"library",
+								"{{bookHash}}",
+								"upload"
+							]
+						},
+						"description": "Upload a local book file for an existing library metadata record."
+					},
+					"response": []
+				},
+				{
+					"name": "Download Book File",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/library/{{bookHash}}/download",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"library",
+								"{{bookHash}}",
+								"download"
+							]
+						},
+						"description": "Download the current user's stored cloud book file."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Library Book",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/library/{{bookHash}}?deletePhysicalFile=true",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"library",
+								"{{bookHash}}"
+							],
+							"query": [
+								{
+									"key": "deletePhysicalFile",
+									"value": "true"
+								}
+							]
+						},
+						"description": "Delete library metadata. By default this also deletes the physical file."
+					},
+					"response": []
+				}
+			],
+			"description": "Personal cloud library metadata and file storage."
+		},
+		{
+			"name": "Progress",
+			"item": [
+				{
+					"name": "Save Progress",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bookHash\": \"{{bookHash}}\",\n  \"chapterIdx\": 1,\n  \"scrollPct\": 0.42\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/progress/{{bookHash}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"progress",
+								"{{bookHash}}"
+							]
+						},
+						"description": "Save or update reading progress for a book."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Progress",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/progress/{{bookHash}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"progress",
+								"{{bookHash}}"
+							]
+						},
+						"description": "Get the latest reading progress for a book."
+					},
+					"response": []
+				}
+			],
+			"description": "Reading progress APIs used by Android and sync."
+		},
+		{
+			"name": "Bookmarks",
+			"item": [
+				{
+					"name": "List Bookmarks",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/books/{{bookHash}}/bookmarks",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"books",
+								"{{bookHash}}",
+								"bookmarks"
+							]
+						},
+						"description": "List non-deleted bookmarks for a specific book."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Bookmark",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bookHash\": \"{{bookHash}}\",\n  \"chapterIdx\": 2,\n  \"scrollPct\": 0.15,\n  \"snippet\": \"Interesting quote\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/books/{{bookHash}}/bookmarks",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"books",
+								"{{bookHash}}",
+								"bookmarks"
+							]
+						},
+						"description": "Create a bookmark for a book."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Bookmark",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"chapterIdx\": 3,\n  \"scrollPct\": 0.35,\n  \"snippet\": \"Updated bookmark note\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/bookmarks/{{bookmarkId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"bookmarks",
+								"{{bookmarkId}}"
+							]
+						},
+						"description": "Update snippet, chapter index, and scroll percent for a bookmark."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Bookmark",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/bookmarks/{{bookmarkId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"bookmarks",
+								"{{bookmarkId}}"
+							]
+						},
+						"description": "Soft-delete a bookmark for sync support."
+					},
+					"response": []
+				}
+			],
+			"description": "Create, list, update, and soft-delete bookmarks."
+		},
+		{
+			"name": "Highlights",
+			"item": [
+				{
+					"name": "List Highlights",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/books/{{bookHash}}/highlights",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"books",
+								"{{bookHash}}",
+								"highlights"
+							]
+						},
+						"description": "List non-deleted highlights for a book."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Highlight",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bookHash\": \"{{bookHash}}\",\n  \"chapterIdx\": 1,\n  \"startOffset\": 10,\n  \"endOffset\": 45,\n  \"textContent\": \"Highlighted text sample\",\n  \"color\": \"yellow\",\n  \"note\": \"Remember this passage\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/books/{{bookHash}}/highlights",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"books",
+								"{{bookHash}}",
+								"highlights"
+							]
+						},
+						"description": "Create a text highlight for a book."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Highlight",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"chapterIdx\": 1,\n  \"startOffset\": 12,\n  \"endOffset\": 50,\n  \"textContent\": \"Updated highlighted text sample\",\n  \"color\": \"green\",\n  \"note\": \"Updated note\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/highlights/{{highlightId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"highlights",
+								"{{highlightId}}"
+							]
+						},
+						"description": "Update a highlight text range, color, and note."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Highlight",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/highlights/{{highlightId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"highlights",
+								"{{highlightId}}"
+							]
+						},
+						"description": "Soft-delete a highlight."
+					},
+					"response": []
+				}
+			],
+			"description": "Store highlights, notes, and color metadata."
+		},
+		{
+			"name": "Collections",
+			"item": [
+				{
+					"name": "List Collections",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/collections",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"collections"
+							]
+						},
+						"description": "List all collections for the current user."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Collection",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Favorites\",\n  \"description\": \"My favorite books\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/collections",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"collections"
+							]
+						},
+						"description": "Create a new collection or shelf."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Collection",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Favorites Updated\",\n  \"description\": \"Updated collection description\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/collections/{{collectionId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"collections",
+								"{{collectionId}}"
+							]
+						},
+						"description": "Update collection name and description."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Collection",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/collections/{{collectionId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"collections",
+								"{{collectionId}}"
+							]
+						},
+						"description": "Delete a collection without deleting books."
+					},
+					"response": []
+				},
+				{
+					"name": "Add Book To Collection",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bookHash\": \"{{bookHash}}\",\n  \"position\": 0\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/collections/{{collectionId}}/books",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"collections",
+								"{{collectionId}}",
+								"books"
+							]
+						},
+						"description": "Add a book to a collection with an optional position."
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Book From Collection",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/collections/{{collectionId}}/books/{{bookHash}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"collections",
+								"{{collectionId}}",
+								"books",
+								"{{bookHash}}"
+							]
+						},
+						"description": "Remove a book from a collection by book hash."
+					},
+					"response": []
+				}
+			],
+			"description": "Bookshelves and collection ordering."
+		},
+		{
+			"name": "Sync",
+			"item": [
+				{
+					"name": "Push Sync Changes",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"progress\": [\n    {\n      \"bookHash\": \"{{bookHash}}\",\n      \"chapterIdx\": 1,\n      \"scrollPct\": 0.5,\n      \"updatedAt\": \"2026-06-20T10:00:00Z\"\n    }\n  ],\n  \"bookmarks\": [],\n  \"highlights\": [],\n  \"collections\": []\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/sync/push",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"sync",
+								"push"
+							]
+						},
+						"description": "Push local changes from the Android client to the server."
+					},
+					"response": []
+				},
+				{
+					"name": "Pull Sync Changes",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/sync/pull?since={{syncSince}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"sync",
+								"pull"
+							],
+							"query": [
+								{
+									"key": "since",
+									"value": "{{syncSince}}"
+								}
+							]
+						},
+						"description": "Pull server-side records changed after the provided timestamp."
+					},
+					"response": []
+				},
+				{
+					"name": "Push Deleted Records",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bookmarkIds\": [{{bookmarkId}}],\n  \"highlightIds\": [{{highlightId}}],\n  \"collectionIds\": [{{collectionId}}]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/sync/deletes",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"sync",
+								"deletes"
+							]
+						},
+						"description": "Send deleted record IDs for bookmarks, highlights, and collections."
+					},
+					"response": []
+				}
+			],
+			"description": "Offline-first synchronization endpoints."
+		},
+		{
+			"name": "Transfers",
+			"item": [
+				{
+					"name": "Send Book",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"receiverEmail\": \"{{receiverEmail}}\",\n  \"bookHash\": \"{{bookHash}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"transfers"
+							]
+						},
+						"description": "Send a current user's cloud book to another user by email."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Inbox",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/inbox",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"transfers",
+								"inbox"
+							]
+						},
+						"description": "List transfer inbox items for the current receiver."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Transfer",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/{{transferId}}/accept",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"transfers",
+								"{{transferId}}",
+								"accept"
+							]
+						},
+						"description": "Accept a transfer and return download information."
+					},
+					"response": []
+				},
+				{
+					"name": "Decline Transfer",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/{{transferId}}/decline",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"transfers",
+								"{{transferId}}",
+								"decline"
+							]
+						},
+						"description": "Decline a pending transfer."
+					},
+					"response": []
+				}
+			],
+			"description": "Send books between users and manage inbox actions."
+		},
+		{
+			"name": "Store - Public",
+			"item": [
+				{
+					"name": "List Public Books",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/store?page={{page}}&size={{size}}&category={{category}}&q={{searchQuery}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"store"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "{{page}}"
+								},
+								{
+									"key": "size",
+									"value": "{{size}}"
+								},
+								{
+									"key": "category",
+									"value": "{{category}}"
+								},
+								{
+									"key": "q",
+									"value": "{{searchQuery}}"
+								}
+							]
+						},
+						"description": "List active public books with pagination, category filter, and search."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Public Book Detail",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/store/{{storeBookId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"store",
+								"{{storeBookId}}"
+							]
+						},
+						"description": "Get active public book details by store ID."
+					},
+					"response": []
+				},
+				{
+					"name": "Download Public Book",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/store/{{storeBookId}}/download",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"store",
+								"{{storeBookId}}",
+								"download"
+							]
+						},
+						"description": "Download a public book file and increment download count."
+					},
+					"response": []
+				}
+			],
+			"description": "Public store browsing and downloads."
+		},
+		{
+			"name": "Store - Admin",
+			"item": [
+				{
+					"name": "Create Public Book",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminAccessToken}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "bookHash",
+									"value": "{{bookHash}}",
+									"type": "text"
+								},
+								{
+									"key": "title",
+									"value": "Public Sample Book",
+									"type": "text"
+								},
+								{
+									"key": "author",
+									"value": "Public Author",
+									"type": "text"
+								},
+								{
+									"key": "description",
+									"value": "Book description for the public store.",
+									"type": "text"
+								},
+								{
+									"key": "language",
+									"value": "en",
+									"type": "text"
+								},
+								{
+									"key": "category",
+									"value": "fiction",
+									"type": "text"
+								},
+								{
+									"key": "active",
+									"value": "true",
+									"type": "text"
+								},
+								{
+									"key": "file",
+									"type": "file",
+									"src": "{{bookFilePath}}"
+								},
+								{
+									"key": "coverImage",
+									"type": "file",
+									"src": "{{coverFilePath}}"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/store",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"store"
+							]
+						},
+						"description": "Create a public store book with multipart metadata, file, and optional cover image."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Public Book",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminAccessToken}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "title",
+									"value": "Updated Public Sample Book",
+									"type": "text"
+								},
+								{
+									"key": "author",
+									"value": "Updated Public Author",
+									"type": "text"
+								},
+								{
+									"key": "description",
+									"value": "Updated public description.",
+									"type": "text"
+								},
+								{
+									"key": "language",
+									"value": "en",
+									"type": "text"
+								},
+								{
+									"key": "category",
+									"value": "fiction",
+									"type": "text"
+								},
+								{
+									"key": "active",
+									"value": "true",
+									"type": "text"
+								},
+								{
+									"key": "file",
+									"type": "file",
+									"src": "{{bookFilePath}}"
+								},
+								{
+									"key": "coverImage",
+									"type": "file",
+									"src": "{{coverFilePath}}"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/store/{{storeBookId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"store",
+								"{{storeBookId}}"
+							]
+						},
+						"description": "Update public store metadata and optionally replace files."
+					},
+					"response": []
+				}
+			],
+			"description": "Admin-only public store management endpoints."
+		}
+	],
+	"variable": [
+		{
+			"key": "collectionVersion",
+			"value": "1"
+		}
+	]
+}
