@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -41,6 +42,13 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import android.graphics.Bitmap
@@ -62,14 +70,30 @@ fun ReaderScreen(
     viewModel: ReaderViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val window = (context as? android.app.Activity)?.window
+        if (window != null) {
+            val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+        }
+        onDispose {
+            val window = (context as? android.app.Activity)?.window
+            if (window != null) {
+                val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                controller.show(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            }
+        }
+    }
+
+
     val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val isTtsPlaying by viewModel.isTtsPlaying.collectAsState()
     val scrollState = rememberScrollState()
 
-    var showAppearanceDialog by remember { mutableStateOf(false) }
-    
+    var showControlMenu by remember { mutableStateOf(false) }
     // Paragraph selection / actions states
     var selectedParagraphIndex by remember { mutableStateOf(-1) }
     var selectedParagraphText by remember { mutableStateOf("") }
@@ -142,108 +166,6 @@ fun ReaderScreen(
 
     val currentFontFamily = if (settings.fontFamily == "sans-serif") FontFamily.SansSerif else FontFamily.Serif
 
-    // Appearance settings dialog definition
-    if (showAppearanceDialog) {
-        AlertDialog(
-            onDismissRequest = { showAppearanceDialog = false },
-            title = { Text("Cài đặt giao diện đọc", style = MaterialTheme.typography.titleLarge) },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Font Size control
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Cỡ chữ", style = MaterialTheme.typography.bodyMedium)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = { viewModel.changeFontSize((settings.fontSizeSp - 2).coerceAtLeast(12)) },
-                                colors = ButtonDefaults.buttonColors(containerColor = currentButtonContainerColor, contentColor = currentButtonContentColor)
-                            ) {
-                                Text("-", color = currentButtonContentColor, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            }
-                            Text("${settings.fontSizeSp} sp", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = currentTextColor))
-                            Button(
-                                onClick = { viewModel.changeFontSize((settings.fontSizeSp + 2).coerceAtMost(30)) },
-                                colors = ButtonDefaults.buttonColors(containerColor = currentButtonContainerColor, contentColor = currentButtonContentColor)
-                            ) {
-                                Text("+", color = currentButtonContentColor, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            }
-                        }
-                    }
-
-                    // Font Family control
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Phông chữ", style = MaterialTheme.typography.bodyMedium, color = currentTextColor)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
-                                selected = settings.fontFamily == "serif",
-                                onClick = { viewModel.changeFontFamily("serif") },
-                                label = { Text("Serif") }
-                            )
-                            FilterChip(
-                                selected = settings.fontFamily == "sans-serif",
-                                onClick = { viewModel.changeFontFamily("sans-serif") },
-                                label = { Text("Sans-Serif") }
-                            )
-                        }
-                    }
-
-                    // Theme control
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Chủ đề nền", style = MaterialTheme.typography.bodyMedium, color = currentTextColor)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { viewModel.changeReadingTheme("warm") },
-                                colors = ButtonDefaults.buttonColors(containerColor = PtBackgroundWarm, contentColor = PtTextWarm),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Ấm", color = PtTextWarm, fontWeight = FontWeight.Bold)
-                            }
-                            Button(
-                                onClick = { viewModel.changeReadingTheme("light") },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Sáng", color = Color.Black, fontWeight = FontWeight.Bold)
-                            }
-                            Button(
-                                onClick = { viewModel.changeReadingTheme("dark") },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1E), contentColor = Color.White),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Tối", color = Color.White, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { showAppearanceDialog = false },
-                    colors = ButtonDefaults.textButtonColors(contentColor = currentIconTint)
-                ) {
-                    Text("Đóng", color = currentIconTint, fontWeight = FontWeight.Bold)
-                }
-            }
-        )
-    }
 
     // Paragraph actions menu sheet
     if (showParagraphActions) {
@@ -651,78 +573,121 @@ fun ReaderScreen(
     if (showQuoteCardDialog) {
         AlertDialog(
             onDismissRequest = { showQuoteCardDialog = false },
-            title = { Text("Chia sẻ Quote Card", fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    "Quote Card",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif)
+                )
+            },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Custom drawn Quote Card Mock
+                    // Premium Quote Card
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(200.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(PtSurfaceWarm),
-                        contentAlignment = Alignment.Center
+                            .height(220.dp)
+                            .clip(RoundedCornerShape(12.dp))
                     ) {
+                        // Background gradient
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color(0xFF061A2B),
+                                            Color(0xFF0A3759)
+                                        )
+                                    )
+                                )
+                        )
+
+                        // Decorative elements drawn on Canvas
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val w = size.width
                             val h = size.height
 
-                            // Draw luxury card borders / design frames
-                            drawRect(
-                                color = PtNavyPrimary,
-                                topLeft = Offset(12.dp.toPx(), 12.dp.toPx()),
-                                size = Size(w - 24.dp.toPx(), h - 24.dp.toPx()),
-                                style = Stroke(width = 2.dp.toPx())
+                            // Large subtle circle top-right
+                            drawCircle(
+                                color = Color.White.copy(alpha = 0.04f),
+                                radius = 120.dp.toPx(),
+                                center = Offset(w * 0.85f, h * 0.15f)
                             )
-                            
-                            // Draw decorative corner markings
-                            drawCircle(PtNavyPrimary, 4.dp.toPx(), Offset(16.dp.toPx(), 16.dp.toPx()))
-                            drawCircle(PtNavyPrimary, 4.dp.toPx(), Offset(w - 16.dp.toPx(), 16.dp.toPx()))
-                            drawCircle(PtNavyPrimary, 4.dp.toPx(), Offset(16.dp.toPx(), h - 16.dp.toPx()))
-                            drawCircle(PtNavyPrimary, 4.dp.toPx(), Offset(w - 16.dp.toPx(), h - 16.dp.toPx()))
+                            // Gold horizontal line at top & bottom
+                            drawLine(
+                                color = PtGoldenAccent.copy(alpha = 0.6f),
+                                start = Offset(24.dp.toPx(), 20.dp.toPx()),
+                                end = Offset(w - 24.dp.toPx(), 20.dp.toPx()),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                            drawLine(
+                                color = PtGoldenAccent.copy(alpha = 0.6f),
+                                start = Offset(24.dp.toPx(), h - 20.dp.toPx()),
+                                end = Offset(w - 24.dp.toPx(), h - 20.dp.toPx()),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                            // Corner dots
+                            drawCircle(PtGoldenAccent, 3.dp.toPx(), Offset(24.dp.toPx(), 20.dp.toPx()))
+                            drawCircle(PtGoldenAccent, 3.dp.toPx(), Offset(w - 24.dp.toPx(), 20.dp.toPx()))
+                            drawCircle(PtGoldenAccent, 3.dp.toPx(), Offset(24.dp.toPx(), h - 20.dp.toPx()))
+                            drawCircle(PtGoldenAccent, 3.dp.toPx(), Offset(w - 24.dp.toPx(), h - 20.dp.toPx()))
                         }
 
+                        // Content overlay
                         Column(
-                            modifier = Modifier.padding(24.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 28.dp, vertical = 28.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
                             Text(
                                 text = "“",
-                                fontSize = 48.sp,
+                                fontSize = 40.sp,
                                 fontFamily = FontFamily.Serif,
-                                color = PtNavyPrimary
+                                color = PtGoldenAccent,
+                                lineHeight = 20.sp,
+                                modifier = Modifier.offset(y = 8.dp)
                             )
                             Text(
                                 text = selectedParagraphText,
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontFamily = FontFamily.Serif,
                                     fontStyle = FontStyle.Italic,
-                                    textAlign = TextAlign.Center
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 22.sp
                                 ),
-                                maxLines = 4,
-                                color = PtTextMain
+                                maxLines = 5,
+                                color = Color.White
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(40.dp)
+                                    .height(1.dp)
+                                    .background(PtGoldenAccent.copy(alpha = 0.5f))
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = "— ${(uiState as? ReaderUiState.Success)?.bookTitle ?: "PageTurn"}",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp,
-                                    color = PtNavyPrimary
+                                    color = PtGoldenAccent
                                 )
                             )
                         }
                     }
 
                     Text(
-                        text = "Thiết kế thẻ trích dẫn Serif cổ điển.",
+                        text = "Thiết kế thẻ trích dẫn cao cấp.",
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color.Gray
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             },
@@ -740,7 +705,9 @@ fun ReaderScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = currentButtonContainerColor, contentColor = currentButtonContentColor)
                 ) {
-                    Text("Chia sẻ qua ứng dụng", color = currentButtonContentColor, fontWeight = FontWeight.Bold)
+                    Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp), tint = currentButtonContentColor)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Chia sẻ", color = currentButtonContentColor, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -755,49 +722,6 @@ fun ReaderScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "PageTurn",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontStyle = FontStyle.Italic,
-                                fontSize = 24.sp,
-                                color = currentTitleColor
-                            )
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu", tint = currentIconTint)
-                    }
-                },
-                actions = {
-                    // Font adjustment button (Tt) styled beautifully
-                    IconButton(onClick = { showAppearanceDialog = true }) {
-                        Text("Tt", style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = currentIconTint))
-                    }
-                    // Profile Icon
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(currentIconTint.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "U",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = currentIconTint)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = currentSurfaceColor)
-            )
-        },
         containerColor = currentBgColor
     ) { innerPadding ->
         when (val state = uiState) {
@@ -815,23 +739,28 @@ fun ReaderScreen(
                 val isBookmarked by viewModel.isBookmarked(chapterNumber = state.chapter.chapterNumber, pageNumber = 42).collectAsState(initial = false)
                 val highlights by viewModel.getHighlights(state.chapter.chapterNumber).collectAsState(initial = emptyList())
 
-                // Dynamic Pagination: PDF = 1 image per page, text = 5 paragraphs per page
+                // Dynamic Pagination: PDF = 1 image per page, text = character budget pagination
                 val paragraphs = state.chapter.content.split("\n\n")
                 val isPdfContent = paragraphs.any { it.startsWith("[page_image:") && it.endsWith("]") }
-                val paragraphsPerPage = if (isPdfContent) 1 else 5
                 val pdfParagraphs = if (isPdfContent)
                     paragraphs.filter { it.startsWith("[page_image:") && it.endsWith("]") }
-                else paragraphs
-                val totalPages = if (isPdfContent)
-                    pdfParagraphs.size
-                else
-                    (paragraphs.size + paragraphsPerPage - 1) / paragraphsPerPage
+                else emptyList()
 
-                // State to collapse/expand the bottom control bar
-                var bottomBarExpanded by remember { mutableStateOf(true) }
+                val paginatedTextPages = remember(state.chapter.content, settings.fontSizeSp) {
+                    if (isPdfContent) emptyList() else paginateText(state.chapter.content, settings.fontSizeSp)
+                }
+
+                val totalPages = if (isPdfContent) pdfParagraphs.size else paginatedTextPages.size
 
                 val initialParagraph = viewModel.initialParagraph
-                val targetPage = if (isPdfContent) initialParagraph else initialParagraph / paragraphsPerPage
+                val targetPage = if (isPdfContent) {
+                    initialParagraph
+                } else {
+                    val pageIdx = paginatedTextPages.indexOfFirst { pageList ->
+                        pageList.any { it.absoluteIndex == initialParagraph }
+                    }
+                    if (pageIdx != -1) pageIdx else 0
+                }
                 val pagerState = rememberPagerState(initialPage = targetPage.coerceIn(0, totalPages - 1)) { totalPages }
 
                 var isFirstLoad by remember { mutableStateOf(true) }
@@ -850,19 +779,148 @@ fun ReaderScreen(
                     viewModel.updateProgress(pagerState.currentPage + 1, totalPages)
                 }
 
+                var lastScaleTime by remember { mutableStateOf(0L) }
                 Scaffold(
                     modifier = Modifier.padding(innerPadding),
+                    topBar = {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(currentBgColor)
+                                .statusBarsPadding()
+                                .height(44.dp)
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = onBackClick,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = currentIconTint,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = state.bookTitle,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = currentTitleColor
+                                ),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            // Nút di chuyển trang nhanh
+                            var showGoToPageDialog by remember { mutableStateOf(false) }
+                            var pageInputText by remember { mutableStateOf("") }
+
+                            if (showGoToPageDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showGoToPageDialog = false },
+                                    title = { Text("Đi tới trang", color = currentTextColor, fontWeight = FontWeight.Bold) },
+                                    text = {
+                                        Column {
+                                            Text(
+                                                "Nhập số trang từ 1 đến $totalPages:",
+                                                color = currentTextSecondaryColor,
+                                                modifier = Modifier.padding(bottom = 8.dp)
+                                            )
+                                            OutlinedTextField(
+                                                value = pageInputText,
+                                                onValueChange = { input ->
+                                                    // Chỉ cho phép nhập số dương
+                                                    val filtered = input.filter { char -> char.isDigit() }
+                                                    pageInputText = filtered
+                                                },
+                                                placeholder = { Text("Ví dụ: 45") },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                                ),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedTextColor = currentTextColor,
+                                                    unfocusedTextColor = currentTextColor,
+                                                    focusedBorderColor = currentIconTint,
+                                                    unfocusedBorderColor = currentTextColor.copy(alpha = 0.5f)
+                                                ),
+                                                singleLine = true
+                                            )
+                                        }
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                val enteredNum = pageInputText.toIntOrNull()
+                                                if (enteredNum != null) {
+                                                    // Chuẩn hóa validate: lớn hơn max thì về max, nhỏ hơn hoặc bằng 0 thì về 1
+                                                    val pageNumber = when {
+                                                        enteredNum > totalPages -> totalPages
+                                                        enteredNum <= 0 -> 1
+                                                        else -> enteredNum
+                                                    }
+                                                    scope.launch {
+                                                        pagerState.scrollToPage(pageNumber - 1)
+                                                    }
+                                                }
+                                                showGoToPageDialog = false
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = currentButtonContainerColor,
+                                                contentColor = currentButtonContentColor
+                                            )
+                                        ) {
+                                            Text("Đi tới", color = currentButtonContentColor, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showGoToPageDialog = false }) {
+                                            Text("Hủy", color = currentIconTint)
+                                        }
+                                    }
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    pageInputText = (pagerState.currentPage + 1).toString()
+                                    showGoToPageDialog = true
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FindInPage,
+                                    contentDescription = "Go to page",
+                                    tint = currentIconTint,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    },
                     bottomBar = {
                         Column(
                             modifier = Modifier
                                 .background(currentSurfaceColor)
                                 .fillMaxWidth()
                         ) {
-                            // Always-visible: page info row + toggle button
+                            LinearProgressIndicator(
+                                progress = if (totalPages > 0) (pagerState.currentPage + 1).toFloat() / totalPages.toFloat() else 0f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(3.dp),
+                                color = currentIconTint,
+                                trackColor = currentIconTint.copy(alpha = 0.2f)
+                            )
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 4.dp, bottom = 2.dp, start = 16.dp, end = 8.dp),
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -871,122 +929,180 @@ fun ReaderScreen(
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = currentTextSecondaryColor
                                 )
-                                // Collapse / Expand toggle arrow
+
                                 IconButton(
-                                    onClick = { bottomBarExpanded = !bottomBarExpanded },
-                                    modifier = Modifier.size(32.dp)
+                                    onClick = { showControlMenu = !showControlMenu },
+                                    modifier = Modifier.size(36.dp)
                                 ) {
                                     Icon(
-                                        imageVector = if (bottomBarExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                                        contentDescription = if (bottomBarExpanded) "Ẩn thanh điều khiển" else "Hiện thanh điều khiển",
+                                        imageVector = if (showControlMenu) Icons.Default.KeyboardArrowDown else Icons.Default.Tune,
+                                        contentDescription = "Menu",
                                         tint = currentIconTint
                                     )
                                 }
                             }
-                            // Progress indicator bar
-                            LinearProgressIndicator(
-                                progress = (pagerState.currentPage + 1).toFloat() / totalPages.toFloat(),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(3.dp),
-                                color = currentIconTint,
-                                trackColor = currentIconTint.copy(alpha = 0.2f)
-                            )
 
-                            // Collapsible control section
-                            if (bottomBarExpanded) {
-                                // Bottom control actions with proper library icons
-                                val currentPageParagraphs = remember(pagerState.currentPage, if (isPdfContent) pdfParagraphs else paragraphs) {
-                                    val sourceList = if (isPdfContent) pdfParagraphs else paragraphs
-                                    val startIndex = pagerState.currentPage * paragraphsPerPage
-                                    val endIndex = minOf(startIndex + paragraphsPerPage, sourceList.size)
-                                    sourceList.subList(startIndex, endIndex)
-                                }
-                                Row(
+                            if (showControlMenu) {
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(
+                                                    currentSurfaceColor,
+                                                    currentSurfaceColor
+                                                )
+                                            )
+                                        )
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(18.dp)
                                 ) {
-                                    // Previous Page Arrow
-                                    IconButton(
-                                        onClick = {
-                                            if (pagerState.currentPage > 0) {
-                                                scope.launch {
-                                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                                }
-                                            }
-                                        },
-                                        enabled = pagerState.currentPage > 0
+                                    // Section: Font Size
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ArrowBack,
-                                            contentDescription = "Previous page",
-                                            tint = if (pagerState.currentPage > 0) currentIconTint else currentIconTint.copy(alpha = 0.3f)
+                                        Text(
+                                            "Cỡ chữ",
+                                            color = currentTextSecondaryColor,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
                                         )
-                                    }
-
-                                    // Appearance (Settings icon)
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.clickable { showAppearanceDialog = true }
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Appearance", tint = currentIconTint)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text("GIAO DIỆN", style = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp, color = currentIconTint))
-                                    }
-
-                                    // TTS Audio Playback button
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.clickable {
-                                            if (isTtsPlaying) {
-                                                viewModel.stopSpeaking()
-                                            } else {
-                                                viewModel.speak(currentPageParagraphs.joinToString("\n\n"))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(0.dp),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(24.dp))
+                                                .border(1.dp, currentIconTint.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                                        ) {
+                                            IconButton(
+                                                onClick = { viewModel.changeFontSize((settings.fontSizeSp - 1).coerceAtLeast(12)) },
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Icon(imageVector = Icons.Default.Remove, contentDescription = "Decrease", tint = currentIconTint, modifier = Modifier.size(18.dp))
+                                            }
+                                            Text(
+                                                "${settings.fontSizeSp}sp",
+                                                color = currentTextColor,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                modifier = Modifier.padding(horizontal = 6.dp)
+                                            )
+                                            IconButton(
+                                                onClick = { viewModel.changeFontSize((settings.fontSizeSp + 1).coerceAtMost(30)) },
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Icon(imageVector = Icons.Default.Add, contentDescription = "Increase", tint = currentIconTint, modifier = Modifier.size(18.dp))
                                             }
                                         }
+                                    }
+
+                                    // Section: Font Family
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            imageVector = if (isTtsPlaying) Icons.Default.Close else Icons.Default.PlayArrow,
-                                            contentDescription = "TTS",
-                                            tint = currentIconTint
+                                        Text(
+                                            "Phông chữ",
+                                            color = currentTextSecondaryColor,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
                                         )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text("ĐỌC SÁCH", style = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp, color = currentIconTint))
-                                    }
-
-                                    // Share (Share icon)
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.clickable {
-                                            selectedParagraphText = currentPageParagraphs.firstOrNull() ?: ""
-                                            selectedParagraphIndex = pagerState.currentPage * paragraphsPerPage
-                                            showQuoteCardDialog = true
-                                        }
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share", tint = currentIconTint)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text("CHIA SẺ", style = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp, color = currentIconTint))
-                                    }
-
-                                    // Next Page Arrow
-                                    IconButton(
-                                        onClick = {
-                                            if (pagerState.currentPage < totalPages - 1) {
-                                                scope.launch {
-                                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            listOf("serif" to "Serif", "sans-serif" to "Sans").forEach { (key, label) ->
+                                                val isSelected = settings.fontFamily == key
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(20.dp))
+                                                        .background(
+                                                            if (isSelected) currentIconTint
+                                                            else currentIconTint.copy(alpha = 0.08f)
+                                                        )
+                                                        .clickable { viewModel.changeFontFamily(key) }
+                                                        .padding(horizontal = 16.dp, vertical = 7.dp)
+                                                ) {
+                                                    Text(
+                                                        label,
+                                                        color = if (isSelected) currentBgColor else currentTextColor,
+                                                        fontFamily = if (key == "serif") FontFamily.Serif else FontFamily.SansSerif,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        fontSize = 13.sp
+                                                    )
                                                 }
                                             }
-                                        },
-                                        enabled = pagerState.currentPage < totalPages - 1
+                                        }
+                                    }
+
+                                    // Section: Reading Theme
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ArrowForward,
-                                            contentDescription = "Next page",
-                                            tint = if (pagerState.currentPage < totalPages - 1) currentIconTint else currentIconTint.copy(alpha = 0.3f)
+                                        Text(
+                                            "Nền đọc",
+                                            color = currentTextSecondaryColor,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
                                         )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            // Warm theme button
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(CircleShape)
+                                                    .background(PtBackgroundWarm)
+                                                    .border(
+                                                        width = if (settings.readingTheme == "warm") 2.dp else 1.dp,
+                                                        color = if (settings.readingTheme == "warm") PtNavyPrimary else PtDividerWarm,
+                                                        shape = CircleShape
+                                                    )
+                                                    .clickable { viewModel.changeReadingTheme("warm") },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (settings.readingTheme == "warm") {
+                                                    Text("✓", color = PtNavyPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                            // Light theme button
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.White)
+                                                    .border(
+                                                        width = if (settings.readingTheme == "light") 2.dp else 1.dp,
+                                                        color = if (settings.readingTheme == "light") PtNavyPrimary else Color(0xFFDDDDDD),
+                                                        shape = CircleShape
+                                                    )
+                                                    .clickable { viewModel.changeReadingTheme("light") },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (settings.readingTheme == "light") {
+                                                    Text("✓", color = PtNavyPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                            // Dark theme button
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF1A1A2E))
+                                                    .border(
+                                                        width = if (settings.readingTheme == "dark") 2.dp else 1.dp,
+                                                        color = if (settings.readingTheme == "dark") Color(0xFF5399D6) else Color(0xFF333344),
+                                                        shape = CircleShape
+                                                    )
+                                                    .clickable { viewModel.changeReadingTheme("dark") },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (settings.readingTheme == "dark") {
+                                                    Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -999,239 +1115,248 @@ fun ReaderScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(subPadding)
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    if (dragAmount < -15) {
+                                        showControlMenu = true
+                                    } else if (dragAmount > 15) {
+                                        showControlMenu = false
+                                    }
+                                }
+                            }
+                            .pointerInput(Unit) {
+                                var totalZoom = 1f
+                                detectTransformGestures { _, _, zoom, _ ->
+                                    totalZoom *= zoom
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastScaleTime > 150) {
+                                        if (totalZoom > 1.05f) {
+                                            viewModel.changeFontSize((settings.fontSizeSp + 1).coerceAtMost(30))
+                                            totalZoom = 1f
+                                            lastScaleTime = now
+                                        } else if (totalZoom < 0.95f) {
+                                            viewModel.changeFontSize((settings.fontSizeSp - 1).coerceAtLeast(12))
+                                            totalZoom = 1f
+                                            lastScaleTime = now
+                                        }
+                                    }
+                                }
+                            }
+                            .clickable {
+                                showControlMenu = !showControlMenu
+                            }
                     ) { page ->
-                        val sourceList = if (isPdfContent) pdfParagraphs else paragraphs
-                        val startIndex = page * paragraphsPerPage
-                        val endIndex = minOf(startIndex + paragraphsPerPage, sourceList.size)
-                        val visibleParagraphs = sourceList.subList(startIndex, endIndex)
-
+                        val paddingModifier = if (isPdfContent) {
+                            Modifier.padding(0.dp)
+                        } else {
+                            Modifier.padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 48.dp)
+                        }
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(16.dp)
+                                .then(paddingModifier)
+                                .clickable { showControlMenu = !showControlMenu }
                         ) {
-                            if (page == 0) {
-                                // Book Header Details
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = state.bookTitle,
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 1.sp,
-                                                color = currentTextSecondaryColor
-                                            )
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = state.chapter.title,
-                                            style = MaterialTheme.typography.titleLarge.copy(fontSize = 24.sp, color = currentTitleColor, fontFamily = currentFontFamily)
-                                        )
+                            if (isPdfContent) {
+                                val paragraph = pdfParagraphs.getOrNull(page) ?: ""
+                                if (paragraph.startsWith("[page_image:") && paragraph.endsWith("]")) {
+                                    val imagePath = paragraph.substringAfter("[page_image: ").substringBefore("]")
+                                    val file = java.io.File(imagePath)
+                                    if (file.exists()) {
+                                        val bitmap = remember(imagePath) {
+                                            try {
+                                                val raw = BitmapFactory.decodeFile(imagePath)
+                                                if (raw != null) {
+                                                    val cropped = cropWhiteBorders(raw)
+                                                    cropped.asImageBitmap()
+                                                } else {
+                                                    null
+                                                }
+                                            } catch (e: Exception) {
+                                                null
+                                            }
+                                        }
+                                        if (bitmap != null) {
+                                            var scale by remember { mutableStateOf(1f) }
+                                            var offset by remember { mutableStateOf(Offset.Zero) }
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(0.dp)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Image(
+                                                    bitmap = bitmap,
+                                                    contentDescription = "PDF Page",
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .graphicsLayer(
+                                                            scaleX = scale,
+                                                            scaleY = scale,
+                                                            translationX = offset.x,
+                                                            translationY = offset.y,
+                                                            clip = true
+                                                        )
+                                                        .pointerInput(Unit) {
+                                                            awaitEachGesture {
+                                                                val down = awaitFirstDown()
+                                                                do {
+                                                                    val event = awaitPointerEvent()
+                                                                    val canceled = event.changes.any { it.isConsumed }
+                                                                    if (!canceled) {
+                                                                        val zoomChange = event.calculateZoom()
+                                                                        val panChange = event.calculatePan()
+                                                                        
+                                                                        scale = (scale * zoomChange).coerceIn(1f, 4f)
+                                                                        if (scale > 1f) {
+                                                                            offset = offset + panChange
+                                                                            event.changes.forEach { it.consume() }
+                                                                        } else {
+                                                                            offset = Offset.Zero
+                                                                        }
+                                                                    }
+                                                                } while (!canceled && event.changes.any { it.pressed })
+                                                            }
+                                                        },
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                            }
+                                        }
                                     }
-
-                                    // Bookmark Flag
-                                    BookmarkFlag(
-                                        isBookmarked = isBookmarked,
-                                        onClick = { viewModel.toggleBookmark(chapterNumber = state.chapter.chapterNumber, pageNumber = 42) }
-                                    )
                                 }
+                            } else {
+                                SelectionContainer {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        val pageParagraphs = paginatedTextPages.getOrNull(page) ?: emptyList()
+                                        pageParagraphs.forEach { pageParagraph ->
+                                            val absoluteIndex = pageParagraph.absoluteIndex
+                                            val paragraph = pageParagraph.text
+                                            val pHighlight = highlights.find { it.startOffset == absoluteIndex }
 
-                                Spacer(modifier = Modifier.height(24.dp))
-                            }
-
-                            SelectionContainer {
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    visibleParagraphs.forEachIndexed { relativeIndex, paragraph ->
-                                        val absoluteIndex = startIndex + relativeIndex
-                                        val pHighlight = highlights.find { it.startOffset == absoluteIndex }
-                                        val noteText = pHighlight?.noteText
-                                        val hasNote = !noteText.isNullOrEmpty()
-
-                                        if (paragraph.startsWith("[page_image:") && paragraph.endsWith("]")) {
-                                            val imagePath = paragraph.substringAfter("[page_image: ").substringBefore("]")
-                                            val file = java.io.File(imagePath)
-                                            if (file.exists()) {
-                                                val bitmap = remember(imagePath) {
-                                                    try {
-                                                        val raw = BitmapFactory.decodeFile(imagePath)
-                                                        if (raw != null) {
-                                                            val cropped = cropWhiteBorders(raw)
-                                                            cropped.asImageBitmap()
-                                                        } else {
-                                                            null
-                                                        }
-                                                    } catch (e: Exception) {
-                                                        null
+                                            if (paragraph.startsWith("[image:") && paragraph.endsWith("]")) {
+                                                val imageName = paragraph.substringAfter("[image:").substringBefore("]")
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(150.dp)
+                                                        .padding(vertical = 12.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(currentIconTint.copy(alpha = 0.08f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                                        val w = size.width
+                                                        val h = size.height
+                                                        drawRect(
+                                                            color = currentIconTint.copy(alpha = 0.15f),
+                                                            style = Stroke(width = 1.dp.toPx())
+                                                        )
+                                                        drawCircle(
+                                                            color = currentIconTint.copy(alpha = 0.4f),
+                                                            radius = 28.dp.toPx(),
+                                                            center = Offset(w / 2, h / 2),
+                                                            style = Stroke(width = 2.dp.toPx())
+                                                        )
+                                                        drawLine(
+                                                            color = currentIconTint.copy(alpha = 0.3f),
+                                                            start = Offset(30.dp.toPx(), h / 2),
+                                                            end = Offset(w - 30.dp.toPx(), h / 2),
+                                                            strokeWidth = 2.dp.toPx()
+                                                        )
+                                                    }
+                                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Text(
+                                                            text = "📊 HÌNH ẢNH / BIỂU ĐỒ TÀI LIỆU",
+                                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = currentTextColor)
+                                                        )
+                                                        Text(
+                                                            text = imageName.uppercase().replace("_", " "),
+                                                            style = MaterialTheme.typography.labelSmall.copy(color = currentTextSecondaryColor)
+                                                        )
                                                     }
                                                 }
-                                                if (bitmap != null) {
-                                                    var scale by remember { mutableStateOf(1f) }
-                                                    var offset by remember { mutableStateOf(Offset.Zero) }
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .wrapContentHeight()
-                                                            .clip(RoundedCornerShape(0.dp)) // Clip to prevent overflow into adjacent pages
-                                                            .padding(vertical = 4.dp)
-                                                    ) {
-                                                        Image(
-                                                            bitmap = bitmap,
-                                                            contentDescription = "PDF Page",
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .wrapContentHeight()
-                                                                .graphicsLayer(
-                                                                    scaleX = scale,
-                                                                    scaleY = scale,
-                                                                    translationX = offset.x,
-                                                                    translationY = offset.y,
-                                                                    clip = true
-                                                                )
-                                                                .pointerInput(Unit) {
-                                                                    detectTransformGestures { _, pan, zoom, _ ->
-                                                                        scale = (scale * zoom).coerceIn(1f, 4f)
-                                                                        offset = if (scale == 1f) Offset.Zero else offset + pan
+                                            } else {
+                                                val annotatedText = remember(paragraph, highlights) {
+                                                    buildAnnotatedString {
+                                                        append(paragraph)
+                                                        val paragraphHighlights = highlights.filter { it.startOffset == absoluteIndex }
+                                                        for (highlight in paragraphHighlights) {
+                                                            val sel = highlight.selectedText
+                                                            if (!sel.isNullOrEmpty()) {
+                                                                val startIdx = highlight.endOffset
+                                                                val endIdx = startIdx + sel.length
+                                                                if (startIdx >= 0 && endIdx <= paragraph.length && paragraph.substring(startIdx, endIdx) == sel) {
+                                                                    addStyle(
+                                                                        style = SpanStyle(background = Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.3f)),
+                                                                        start = startIdx,
+                                                                        end = endIdx
+                                                                    )
+                                                                } else {
+                                                                    // Fallback to highlighting all matching words if index is out of bounds or text differs
+                                                                    var fallbackIdx = paragraph.indexOf(sel)
+                                                                    while (fallbackIdx != -1) {
+                                                                        addStyle(
+                                                                            style = SpanStyle(background = Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.3f)),
+                                                                            start = fallbackIdx,
+                                                                            end = fallbackIdx + sel.length
+                                                                        )
+                                                                        fallbackIdx = paragraph.indexOf(sel, fallbackIdx + 1)
                                                                     }
-                                                                },
-                                                            contentScale = ContentScale.FillWidth
+                                                                }
+                                                            } else {
+                                                                addStyle(
+                                                                    style = SpanStyle(background = Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.3f)),
+                                                                    start = 0,
+                                                                    end = paragraph.length
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                var textFieldValue by remember(annotatedText) {
+                                                    mutableStateOf(TextFieldValue(annotatedText))
+                                                }
+
+                                                LaunchedEffect(showColorPickerSheet) {
+                                                    if (!showColorPickerSheet && textFieldValue.selection.length > 0) {
+                                                        textFieldValue = textFieldValue.copy(selection = androidx.compose.ui.text.TextRange.Zero)
+                                                    }
+                                                }
+
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .padding(vertical = 4.dp, horizontal = 8.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.Top
+                                                    ) {
+                                                        BasicTextField(
+                                                            value = textFieldValue,
+                                                            onValueChange = { newValue ->
+                                                                textFieldValue = newValue
+                                                                val sel = newValue.selection
+                                                                if (sel.length > 0) {
+                                                                    activeSelectedText = newValue.annotatedString.text.substring(sel.start, sel.end)
+                                                                    activeParagraphIndex = absoluteIndex
+                                                                    activeSelectedStartChar = minOf(sel.start, sel.end)
+                                                                    showColorPickerSheet = true
+                                                                }
+                                                            },
+                                                            readOnly = true,
+                                                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                                                fontSize = settings.fontSizeSp.sp,
+                                                                fontFamily = currentFontFamily,
+                                                                color = currentTextColor
+                                                            ),
                                                         )
                                                     }
                                                 }
                                             }
-                                        } else if (paragraph.startsWith("[image:") && paragraph.endsWith("]")) {
-                                            val imageName = paragraph.substringAfter("[image:").substringBefore("]")
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(150.dp)
-                                                    .padding(vertical = 12.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(currentIconTint.copy(alpha = 0.08f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                                    val w = size.width
-                                                    val h = size.height
-                                                    drawRect(
-                                                        color = currentIconTint.copy(alpha = 0.15f),
-                                                        style = Stroke(width = 1.dp.toPx())
-                                                    )
-                                                    drawCircle(
-                                                        color = currentIconTint.copy(alpha = 0.4f),
-                                                        radius = 28.dp.toPx(),
-                                                        center = Offset(w / 2, h / 2),
-                                                        style = Stroke(width = 2.dp.toPx())
-                                                    )
-                                                    drawLine(
-                                                        color = currentIconTint.copy(alpha = 0.3f),
-                                                        start = Offset(30.dp.toPx(), h / 2),
-                                                        end = Offset(w - 30.dp.toPx(), h / 2),
-                                                        strokeWidth = 2.dp.toPx()
-                                                    )
-                                                }
-                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                    Text(
-                                                        text = "📊 HÌNH ẢNH / BIỂU ĐỒ TÀI LIỆU",
-                                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = currentTextColor)
-                                                    )
-                                                    Text(
-                                                        text = imageName.uppercase().replace("_", " "),
-                                                        style = MaterialTheme.typography.labelSmall.copy(color = currentTextSecondaryColor)
-                                                    )
-                                                }
-                                            }
-                                        } else {
-                                            val annotatedText = remember(paragraph, highlights) {
-                                                buildAnnotatedString {
-                                                    append(paragraph)
-                                                    val paragraphHighlights = highlights.filter { it.startOffset == absoluteIndex }
-                                                    for (highlight in paragraphHighlights) {
-                                                        val sel = highlight.selectedText
-                                                        if (!sel.isNullOrEmpty()) {
-                                                            val startIdx = highlight.endOffset
-                                                            val endIdx = startIdx + sel.length
-                                                            if (startIdx >= 0 && endIdx <= paragraph.length && paragraph.substring(startIdx, endIdx) == sel) {
-                                                                addStyle(
-                                                                    style = SpanStyle(background = Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.3f)),
-                                                                    start = startIdx,
-                                                                    end = endIdx
-                                                                )
-                                                            } else {
-                                                                // Fallback to highlighting all matching words if index is out of bounds or text differs
-                                                                var fallbackIdx = paragraph.indexOf(sel)
-                                                                while (fallbackIdx != -1) {
-                                                                    addStyle(
-                                                                        style = SpanStyle(background = Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.3f)),
-                                                                        start = fallbackIdx,
-                                                                        end = fallbackIdx + sel.length
-                                                                    )
-                                                                    fallbackIdx = paragraph.indexOf(sel, fallbackIdx + 1)
-                                                                }
-                                                            }
-                                                        } else {
-                                                            addStyle(
-                                                                style = SpanStyle(background = Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.3f)),
-                                                                start = 0,
-                                                                end = paragraph.length
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            var textFieldValue by remember(annotatedText) {
-                                                mutableStateOf(TextFieldValue(annotatedText))
-                                            }
-
-                                            LaunchedEffect(showColorPickerSheet) {
-                                                if (!showColorPickerSheet && textFieldValue.selection.length > 0) {
-                                                    textFieldValue = textFieldValue.copy(selection = androidx.compose.ui.text.TextRange.Zero)
-                                                }
-                                            }
-
-                                            Column(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .padding(vertical = 4.dp, horizontal = 8.dp)
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.Top
-                                                ) {
-                                                    BasicTextField(
-                                                        value = textFieldValue,
-                                                        onValueChange = { newValue ->
-                                                            textFieldValue = newValue
-                                                            val sel = newValue.selection
-                                                            if (sel.length > 0) {
-                                                                activeSelectedText = newValue.annotatedString.text.substring(sel.start, sel.end)
-                                                                activeParagraphIndex = absoluteIndex
-                                                                activeSelectedStartChar = minOf(sel.start, sel.end)
-                                                                showColorPickerSheet = true
-                                                            }
-                                                        },
-                                                        readOnly = true,
-                                                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                                            fontSize = settings.fontSizeSp.sp,
-                                                            fontFamily = currentFontFamily,
-                                                            color = currentTextColor
-                                                        ),
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        
-                                        // Show Illustration after 2nd paragraph of first page
-                                        if (absoluteIndex == 1) {
-                                            IllustrationCard()
                                             Spacer(modifier = Modifier.height(16.dp))
                                         }
                                     }
@@ -1416,4 +1541,76 @@ fun cropWhiteBorders(bitmap: android.graphics.Bitmap): android.graphics.Bitmap {
     } catch (e: Exception) {
         bitmap
     }
+}
+
+data class PageParagraph(
+    val absoluteIndex: Int,
+    val text: String
+)
+
+fun paginateText(content: String, fontSizeSp: Int): List<List<PageParagraph>> {
+    val pages = mutableListOf<List<PageParagraph>>()
+    // Non-linear budget scaling with font size to guarantee no overflow at large sizes
+    val budget = ((10 * 1000) / (fontSizeSp - 3)).coerceIn(250, 900)
+    
+    val rawParagraphs = content.split("\n\n")
+    val paragraphs = if (rawParagraphs.firstOrNull()?.trim()?.toIntOrNull() != null) {
+        rawParagraphs.drop(1)
+    } else {
+        rawParagraphs
+    }
+    
+    var currentPage = mutableListOf<PageParagraph>()
+    var currentPageLength = 0
+    
+    paragraphs.forEachIndexed { index, para ->
+        val trimmedPara = para.trim()
+        if (trimmedPara.isEmpty()) return@forEachIndexed
+        
+        // If the paragraph fits fully on the current page, add it
+        if (currentPageLength + trimmedPara.length <= budget) {
+            currentPage.add(PageParagraph(index, trimmedPara))
+            currentPageLength += trimmedPara.length
+        } else {
+            // Otherwise, split the paragraph into sentences and distribute them
+            val sentences = trimmedPara.split(Regex("(?<=\\.)\\s+"))
+            var sentenceChunk = java.lang.StringBuilder()
+            
+            for (sentence in sentences) {
+                val sentenceTrimmed = sentence.trim()
+                if (sentenceTrimmed.isEmpty()) continue
+                
+                // Check if adding this sentence to the current chunk exceeds the budget
+                if (currentPageLength + sentenceChunk.length + sentenceTrimmed.length > budget) {
+                    // Push the current chunk if it exists
+                    if (sentenceChunk.isNotEmpty()) {
+                        currentPage.add(PageParagraph(index, sentenceChunk.toString().trim()))
+                    }
+                    // Push page
+                    if (currentPage.isNotEmpty()) {
+                        pages.add(currentPage)
+                    }
+                    currentPage = mutableListOf()
+                    currentPageLength = 0
+                    sentenceChunk = java.lang.StringBuilder()
+                }
+                
+                if (sentenceChunk.isNotEmpty()) {
+                    sentenceChunk.append(" ")
+                }
+                sentenceChunk.append(sentenceTrimmed)
+            }
+            
+            if (sentenceChunk.isNotEmpty()) {
+                currentPage.add(PageParagraph(index, sentenceChunk.toString().trim()))
+                currentPageLength += sentenceChunk.length
+            }
+        }
+    }
+    
+    if (currentPage.isNotEmpty()) {
+        pages.add(currentPage)
+    }
+    
+    return pages
 }

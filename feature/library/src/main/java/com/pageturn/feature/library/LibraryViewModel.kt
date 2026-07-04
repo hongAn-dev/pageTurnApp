@@ -115,6 +115,19 @@ class LibraryViewModel @Inject constructor(
 
     init {
         updateCacheSize()
+        viewModelScope.launch {
+            userPreferencesDataSource.userSettings.collectLatest { settings ->
+                if (settings.dailyNotify) {
+                    if (settings.reminderMode == "daily") {
+                        NotificationHelper.scheduleDailyReminder(context, settings.reminderHour, settings.reminderMinute)
+                    } else {
+                        NotificationHelper.scheduleIntervalReminder(context, settings.reminderIntervalVal, settings.reminderIntervalUnit)
+                    }
+                } else {
+                    NotificationHelper.cancelDailyReminder(context)
+                }
+            }
+        }
     }
 
     fun updateCacheSize() {
@@ -163,9 +176,58 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesDataSource.setDailyNotify(enabled)
             if (enabled) {
-                NotificationHelper.scheduleDailyReminder(context)
+                val currentSettings = userPreferencesDataSource.userSettings.first()
+                if (currentSettings.reminderMode == "daily") {
+                    NotificationHelper.scheduleDailyReminder(context, currentSettings.reminderHour, currentSettings.reminderMinute)
+                } else {
+                    NotificationHelper.scheduleIntervalReminder(context, currentSettings.reminderIntervalVal, currentSettings.reminderIntervalUnit)
+                }
             } else {
                 NotificationHelper.cancelDailyReminder(context)
+            }
+        }
+    }
+
+    fun setReminderTime(hour: Int, minute: Int) {
+        viewModelScope.launch {
+            userPreferencesDataSource.setReminderTime(hour, minute)
+            val currentSettings = userPreferencesDataSource.userSettings.first()
+            if (currentSettings.dailyNotify && currentSettings.reminderMode == "daily") {
+                NotificationHelper.scheduleDailyReminder(context, hour, minute)
+            }
+        }
+    }
+
+    fun setReminderIntervalVal(value: Int) {
+        viewModelScope.launch {
+            userPreferencesDataSource.setReminderIntervalVal(value)
+            val currentSettings = userPreferencesDataSource.userSettings.first()
+            if (currentSettings.dailyNotify && currentSettings.reminderMode == "interval") {
+                NotificationHelper.scheduleIntervalReminder(context, value, currentSettings.reminderIntervalUnit)
+            }
+        }
+    }
+
+    fun setReminderIntervalUnit(unit: String) {
+        viewModelScope.launch {
+            userPreferencesDataSource.setReminderIntervalUnit(unit)
+            val currentSettings = userPreferencesDataSource.userSettings.first()
+            if (currentSettings.dailyNotify && currentSettings.reminderMode == "interval") {
+                NotificationHelper.scheduleIntervalReminder(context, currentSettings.reminderIntervalVal, unit)
+            }
+        }
+    }
+
+    fun setReminderMode(mode: String) {
+        viewModelScope.launch {
+            userPreferencesDataSource.setReminderMode(mode)
+            val currentSettings = userPreferencesDataSource.userSettings.first()
+            if (currentSettings.dailyNotify) {
+                if (mode == "daily") {
+                    NotificationHelper.scheduleDailyReminder(context, currentSettings.reminderHour, currentSettings.reminderMinute)
+                } else {
+                    NotificationHelper.scheduleIntervalReminder(context, currentSettings.reminderIntervalVal, currentSettings.reminderIntervalUnit)
+                }
             }
         }
     }
@@ -301,14 +363,14 @@ class LibraryViewModel @Inject constructor(
         _authUiState.value = AuthUiState.Idle
     }
 
-    fun addLocalBook(title: String, author: String, description: String) {
+    fun addLocalBook(title: String, author: String, description: String, coverUrl: String = "") {
         viewModelScope.launch {
             val bookId = "local_${System.currentTimeMillis()}"
             val newBook = Book(
                 id = bookId,
                 title = title,
                 author = author,
-                coverUrl = "",
+                coverUrl = coverUrl,
                 progressPercent = 0.0f,
                 totalPages = 100,
                 currentPage = 0,
@@ -330,6 +392,17 @@ class LibraryViewModel @Inject constructor(
                  } catch (e: Exception) {
                      e.printStackTrace()
                  }
+             }
+         }
+     }
+
+     fun toggleBookFavorite(bookId: String) {
+         viewModelScope.launch {
+             val bookmarkedIds = favoriteBookIds.value
+             if (bookmarkedIds.contains(bookId)) {
+                 bookRepository.removeBookmark("${bookId}_1_1")
+             } else {
+                 bookRepository.addBookmark(bookId, 1, 1)
              }
          }
      }

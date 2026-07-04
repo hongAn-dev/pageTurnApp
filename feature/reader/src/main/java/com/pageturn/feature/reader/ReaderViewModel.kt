@@ -23,13 +23,15 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.pageturn.core.domain.repository.BookRepository
 
 sealed interface ReaderUiState {
     data object Loading : ReaderUiState
-    data class Success(val chapter: Chapter, val bookId: String, val bookTitle: String) : ReaderUiState
+    data class Success(val chapter: Chapter, val bookId: String, val bookTitle: String, val bookAuthor: String) : ReaderUiState
     data class Error(val message: String) : ReaderUiState
 }
 
@@ -45,7 +47,8 @@ class ReaderViewModel @Inject constructor(
     private val removeHighlightUseCase: RemoveHighlightUseCase,
     private val removeHighlightsByParagraphUseCase: RemoveHighlightsByParagraphUseCase,
     private val ttsHelper: PageTurnTtsHelper,
-    private val preferencesDataSource: UserPreferencesDataSource
+    private val preferencesDataSource: UserPreferencesDataSource,
+    private val bookRepository: BookRepository
 ) : ViewModel() {
 
     private val bookId: String = checkNotNull(savedStateHandle["bookId"])
@@ -57,7 +60,7 @@ class ReaderViewModel @Inject constructor(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = UserSettings(16, "serif", "warm")
+            initialValue = UserSettings(16, "serif", "light")
         )
 
     init {
@@ -70,14 +73,22 @@ class ReaderViewModel @Inject constructor(
             _uiState.value = ReaderUiState.Loading
             try {
                 val chapter = getChapterUseCase(bookId, chapterNumber)
-                val bookTitle = when (bookId) {
+                val book = bookRepository.getBookDetails(bookId).firstOrNull()
+                val bookTitle = book?.title ?: when (bookId) {
                     "1" -> "THE ADVENTURES OF SHERLOCK HOLMES"
                     "2" -> "THE GREAT GATSBY"
                     "3" -> "PRIDE AND PREJUDICE"
                     "4" -> "MOBY DICK"
                     else -> "WAR AND PEACE"
                 }
-                _uiState.value = ReaderUiState.Success(chapter, bookId, bookTitle)
+                val bookAuthor = book?.author ?: when (bookId) {
+                    "1" -> "Arthur Conan Doyle"
+                    "2" -> "F. Scott Fitzgerald"
+                    "3" -> "Jane Austen"
+                    "4" -> "Herman Melville"
+                    else -> "Leo Tolstoy"
+                }
+                _uiState.value = ReaderUiState.Success(chapter, bookId, bookTitle, bookAuthor)
             } catch (e: Exception) {
                 _uiState.value = ReaderUiState.Error(e.message ?: "Failed to load chapter")
             }

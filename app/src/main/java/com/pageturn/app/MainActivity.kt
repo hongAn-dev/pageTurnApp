@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val settingsState = preferencesDataSource.userSettings.collectAsState(
-                initial = UserSettings(16, "serif", "warm")
+                initial = UserSettings(16, "serif", "light")
             )
             PageTurnTheme(theme = settingsState.value.readingTheme) {
                 val navController = rememberNavController()

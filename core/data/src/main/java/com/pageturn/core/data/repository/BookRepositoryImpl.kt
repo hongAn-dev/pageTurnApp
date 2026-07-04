@@ -50,7 +50,7 @@ class BookRepositoryImpl @Inject constructor(
             Chapter(
                 id = "${bookId}_$chapterNumber",
                 bookId = bookId,
-                title = "Tài liệu: ${localBook?.title ?: "Sách Local"}",
+                title = localBook?.title ?: "Sách Local",
                 chapterNumber = chapterNumber,
                 content = localBook?.description ?: "Không có nội dung.",
                 imageUrl = ""

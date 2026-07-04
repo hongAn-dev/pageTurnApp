@@ -17,7 +17,13 @@ data class UserSettings(
     val fontFamily: String,
     val readingTheme: String,
     val autoSync: Boolean = true,
-    val dailyNotify: Boolean = false
+    val dailyNotify: Boolean = false,
+    val reminderHour: Int = 20,
+    val reminderMinute: Int = 0,
+    val reminderIntervalMins: Int = 1440,
+    val reminderMode: String = "daily",
+    val reminderIntervalVal: Int = 1,
+    val reminderIntervalUnit: String = "hours"
 )
 
 data class UserProfile(
@@ -35,6 +41,12 @@ class UserPreferencesDataSource @Inject constructor(
     private val readingThemeKey = stringPreferencesKey("reading_theme")
     private val autoSyncKey = booleanPreferencesKey("auto_sync")
     private val dailyNotifyKey = booleanPreferencesKey("daily_notify")
+    private val reminderHourKey = intPreferencesKey("reminder_hour")
+    private val reminderMinuteKey = intPreferencesKey("reminder_minute")
+    private val reminderIntervalMinsKey = intPreferencesKey("reminder_interval_mins")
+    private val reminderModeKey = stringPreferencesKey("reminder_mode")
+    private val reminderIntervalValKey = intPreferencesKey("reminder_interval_val")
+    private val reminderIntervalUnitKey = stringPreferencesKey("reminder_interval_unit")
     
     private val userNameKey = stringPreferencesKey("user_name")
     private val userEmailKey = stringPreferencesKey("user_email")
@@ -47,9 +59,15 @@ class UserPreferencesDataSource @Inject constructor(
         UserSettings(
             fontSizeSp = preferences[fontSizeKey] ?: 16,
             fontFamily = preferences[fontFamilyKey] ?: "serif",
-            readingTheme = preferences[readingThemeKey] ?: "warm",
+            readingTheme = preferences[readingThemeKey] ?: "light",
             autoSync = preferences[autoSyncKey] ?: true,
-            dailyNotify = preferences[dailyNotifyKey] ?: false
+            dailyNotify = preferences[dailyNotifyKey] ?: false,
+            reminderHour = preferences[reminderHourKey] ?: 20,
+            reminderMinute = preferences[reminderMinuteKey] ?: 0,
+            reminderIntervalMins = preferences[reminderIntervalMinsKey] ?: 1440,
+            reminderMode = preferences[reminderModeKey] ?: "daily",
+            reminderIntervalVal = preferences[reminderIntervalValKey] ?: 1,
+            reminderIntervalUnit = preferences[reminderIntervalUnitKey] ?: "hours"
         )
     }
 
@@ -114,6 +132,37 @@ class UserPreferencesDataSource @Inject constructor(
     suspend fun setDailyNotify(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[dailyNotifyKey] = enabled
+        }
+    }
+
+    suspend fun setReminderTime(hour: Int, minute: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[reminderHourKey] = hour
+            preferences[reminderMinuteKey] = minute
+        }
+    }
+
+    suspend fun setReminderInterval(minutes: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[reminderIntervalMinsKey] = minutes
+        }
+    }
+
+    suspend fun setReminderMode(mode: String) {
+        context.dataStore.edit { preferences ->
+            preferences[reminderModeKey] = mode
+        }
+    }
+
+    suspend fun setReminderIntervalVal(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[reminderIntervalValKey] = value
+        }
+    }
+
+    suspend fun setReminderIntervalUnit(unit: String) {
+        context.dataStore.edit { preferences ->
+            preferences[reminderIntervalUnitKey] = unit
         }
     }
 

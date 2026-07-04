@@ -11,18 +11,18 @@ private val LightColorScheme = lightColorScheme(
     onPrimary = Color.White,
     primaryContainer = PtNavyLight,
     onPrimaryContainer = PtTextNavy,
-    background = Color(0xFFF8F9FA),
+    background = Color(0xFFF6F8FA),
     onBackground = PtTextMain,
     surface = Color.White,
     onSurface = PtTextMain,
-    outline = Color(0xFFE5E5EA)
+    outline = Color(0xFFE2E7EC)
 )
 
 private val WarmColorScheme = lightColorScheme(
     primary = PtNavyPrimary,
     onPrimary = Color.White,
-    primaryContainer = PtNavyLight,
-    onPrimaryContainer = PtTextNavy,
+    primaryContainer = PtGoldLight,
+    onPrimaryContainer = PtTextWarm,
     background = PtBackgroundWarm,
     onBackground = PtTextWarm,
     surface = PtSurfaceWarm,
@@ -31,15 +31,15 @@ private val WarmColorScheme = lightColorScheme(
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = PtNavyLight,
-    onPrimary = PtNavyPrimary,
-    primaryContainer = PtNavyDark,
-    onPrimaryContainer = Color.White,
-    background = Color(0xFF121212),
-    onBackground = Color(0xFFE3E3E3),
-    surface = Color(0xFF1E1E1E),
-    onSurface = Color(0xFFE3E3E3),
-    outline = Color(0xFF333333)
+    primary = PtDarkPrimary,
+    onPrimary = PtNavyDark,
+    primaryContainer = PtDarkPrimaryContainer,
+    onPrimaryContainer = PtDarkOnPrimaryContainer,
+    background = PtDarkBg,
+    onBackground = PtDarkText,
+    surface = PtDarkSurface,
+    onSurface = PtDarkText,
+    outline = PtDarkOutline
 )
 
 @Composable
@@ -59,3 +59,4 @@ fun PageTurnTheme(
         content = content
     )
 }
+

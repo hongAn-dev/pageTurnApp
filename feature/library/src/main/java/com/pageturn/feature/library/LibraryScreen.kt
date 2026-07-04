@@ -4,6 +4,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -43,14 +47,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.animation.core.Spring
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import com.pageturn.core.designsystem.theme.*
 import com.pageturn.core.model.Book
 import androidx.compose.ui.graphics.Path
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.draw.alpha
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +79,7 @@ fun LibraryScreen(
     // Favorites and Profile states
     var currentFilter by remember { mutableStateOf("all") }
     var showProfile by remember { mutableStateOf(false) }
+    var selectedCollection by remember { mutableStateOf<String?>(null) }
 
     // File Picker states and Launcher
     var showImportDialog by remember { mutableStateOf(false) }
@@ -75,6 +87,7 @@ fun LibraryScreen(
     var importedBookAuthor by remember { mutableStateOf("") }
     var importedBookDesc by remember { mutableStateOf("") }
     var importedBookContent by remember { mutableStateOf("") }
+    var importedBookCoverPath by remember { mutableStateOf("") }
  
     var isImporting by remember { mutableStateOf(false) }
 
@@ -89,6 +102,7 @@ fun LibraryScreen(
             scope.launch {
                 val fileName = getFileName(context, it)
                 importedBookTitle = fileName.substringBeforeLast(".")
+                importedBookCoverPath = ""
                 
                 val isPdf = fileName.endsWith(".pdf", ignoreCase = true) || context.contentResolver.getType(it) == "application/pdf"
                 val isEpub = fileName.endsWith(".epub", ignoreCase = true) || context.contentResolver.getType(it) == "application/epub+zip"
@@ -103,18 +117,24 @@ fun LibraryScreen(
                         importedBookContent = imagePaths.joinToString("\n\n") { "[page_image: $it]" }
                         importedBookDesc = "Tài liệu PDF gốc gồm ${imagePaths.size} trang."
                         importedBookAuthor = "Tài liệu PDF"
+                        importedBookCoverPath = imagePaths.first()
                     } else {
                         importedBookContent = "Không thể phân tích file PDF."
                         importedBookDesc = "Tài liệu bị lỗi."
                         importedBookAuthor = "Tài liệu PDF"
                     }
                 } else if (isEpub) {
+                    val meta = withContext(Dispatchers.IO) {
+                        parseEpubMetadata(context, it)
+                    }
                     val epubText = withContext(Dispatchers.IO) {
                         parseEpubText(context, it)
                     }
                     importedBookContent = if (epubText.isNotBlank()) epubText else "Ebook EPUB trống."
                     importedBookDesc = "Tài liệu Ebook dạng EPUB nhập từ thiết bị."
-                    importedBookAuthor = "Tác giả EPUB"
+                    importedBookTitle = if (meta.first.isNotBlank()) meta.first else fileName.substringBeforeLast(".")
+                    importedBookAuthor = if (meta.second.isNotBlank()) meta.second else "Tác giả EPUB"
+                    importedBookCoverPath = meta.third
                 } else if (isAzw3) {
                     val azw3Text = withContext(Dispatchers.IO) {
                         parseAzw3Text(context, it)
@@ -165,7 +185,7 @@ fun LibraryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.addLocalBook(importedBookTitle, importedBookAuthor, importedBookContent)
+                        viewModel.addLocalBook(importedBookTitle, importedBookAuthor, importedBookContent, importedBookCoverPath)
                         showImportDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White)
@@ -221,7 +241,8 @@ fun LibraryScreen(
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primaryContainer)
                             .clickable {
-                                showProfile = true
+                                selectedTab = 3
+                                showProfile = false
                                 scope.launch { drawerState.close() }
                             },
                         contentAlignment = Alignment.Center
@@ -284,44 +305,61 @@ fun LibraryScreen(
     ) {
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "PageTurn",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontStyle = FontStyle.Italic,
-                                    fontSize = 24.sp,
-                                    color = MaterialTheme.colorScheme.primary
+                // Premium glassmorphism TopAppBar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.surface,
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
                                 )
                             )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu", tint = MaterialTheme.colorScheme.primary)
-                        }
-                    },
-                    actions = {
-                        // Profile Icon
-                        Box(
-                            modifier = Modifier
-                                .padding(end = 12.dp)
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .clickable { showProfile = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = userProfile.name.firstOrNull()?.uppercase() ?: "U",
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        )
+                        .shadow(elevation = 0.dp)
+                ) {
+                    TopAppBar(
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "PageTurn",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontStyle = FontStyle.Italic,
+                                        fontSize = 22.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontFamily = FontFamily.Serif
+                                    )
+                                )
+                            }
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        },
+                        actions = {},
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                    )
+                    // Bottom separator line
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                        Color.Transparent
+                                    )
+                                )
                             )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-                )
+                    )
+                }
             },
             floatingActionButton = {
                 if (selectedTab == 0 && !showProfile) {
@@ -342,58 +380,78 @@ fun LibraryScreen(
                     .padding(innerPadding)
                     .fillMaxSize()
             ) {
-                if (showProfile) {
-                    ProfileScreenContent(
-                        viewModel = viewModel,
-                        onBack = { showProfile = false },
-                        onSignOut = {
-                            showProfile = false
-                            onSignOut()
-                        }
-                    )
-                } else {
-                    Crossfade(targetState = selectedTab, label = "tabTransition") { tab ->
-                        when (tab) {
-                            0 -> {
+                Crossfade(targetState = selectedTab, label = "tabTransition") { tab ->
+                    when (tab) {
+                        0 -> {
                                 // TAB 0: LIBRARY MAIN VIEW
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .padding(horizontal = 16.dp)
                                 ) {
-                                    // Search Bar
+                                    // Premium Search Bar
                                     OutlinedTextField(
                                         value = searchQuery,
                                         onValueChange = { searchQuery = it },
-                                        placeholder = { Text("Tìm kiếm sách trong thư viện...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                        leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                        placeholder = { Text("Tìm kiếm sách...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.Search,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        },
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(vertical = 12.dp),
-                                        shape = RoundedCornerShape(8.dp),
+                                            .padding(vertical = 12.dp)
+                                            .shadow(elevation = 2.dp, shape = RoundedCornerShape(14.dp)),
+                                        shape = RoundedCornerShape(14.dp),
+                                        singleLine = true,
                                         colors = OutlinedTextFieldDefaults.colors(
                                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                                             focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                            focusedBorderColor = MaterialTheme.colorScheme.primary
+                                            unfocusedBorderColor = Color.Transparent,
+                                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                         )
                                     )
 
-                                    // Filter Chips for All/Favorites
+                                    // Premium Filter Chips
                                     Row(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.padding(bottom = 12.dp)
                                     ) {
-                                        FilterChip(
-                                            selected = currentFilter == "all",
-                                            onClick = { currentFilter = "all" },
-                                            label = { Text("Tất cả sách") }
-                                        )
-                                        FilterChip(
-                                            selected = currentFilter == "favorite",
-                                            onClick = { currentFilter = "favorite" },
-                                            label = { Text("Yêu thích") }
-                                        )
+                                        listOf(
+                                            "all" to "Tất cả",
+                                            "favorite" to "Yêu thích",
+                                            "collections" to "Bộ sưu tập"
+                                        ).forEach { (key, label) ->
+                                            val isSelected = currentFilter == key
+                                            val chipBg = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                                            val chipTextColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(20.dp))
+                                                    .background(chipBg)
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = if (isSelected) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                                        shape = RoundedCornerShape(20.dp)
+                                                    )
+                                                    .clickable {
+                                                        currentFilter = key
+                                                        selectedCollection = null
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = chipTextColor
+                                                )
+                                            }
+                                        }
                                     }
 
                                     // Recent Reads header details
@@ -405,22 +463,27 @@ fun LibraryScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = if (currentFilter == "favorite") "Danh sách yêu thích" else "Sách đọc gần đây",
+                                            text = when {
+                                                currentFilter == "favorite" -> "Danh sách yêu thích"
+                                                currentFilter == "collections" && selectedCollection != null -> "Bộ sưu tập: $selectedCollection"
+                                                currentFilter == "collections" -> "Các bộ sưu tập"
+                                                else -> "Sách đọc gần đây"
+                                            },
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontSize = 20.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                         )
-                                        Text(
-                                            text = "48 CUỐN SÁCH",
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp,
-                                                letterSpacing = 1.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        )
+                                        if (currentFilter == "collections" && selectedCollection != null) {
+                                            TextButton(
+                                                onClick = { selectedCollection = null }
+                                            ) {
+                                                Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Quay lại")
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Quay lại")
+                                            }
+                                        }
                                     }
 
                                     // Grid Content
@@ -437,32 +500,113 @@ fun LibraryScreen(
                                         }
                                         is LibraryUiState.Success -> {
                                             val favoriteBookIds by viewModel.favoriteBookIds.collectAsState()
-                                            val filteredBooks = state.books.filter { book ->
-                                                (currentFilter == "all" || favoriteBookIds.contains(book.id)) &&
-                                                (book.title.contains(searchQuery, ignoreCase = true) ||
-                                                 book.author.contains(searchQuery, ignoreCase = true))
-                                            }
-
-                                            if (filteredBooks.isEmpty()) {
-                                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                                    Text(
-                                                        text = if (currentFilter == "favorite") "Không có sách yêu thích nào" else "Không tìm thấy sách phù hợp",
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        style = MaterialTheme.typography.bodyLarge
-                                                    )
+                                            
+                                            if (currentFilter == "collections") {
+                                                if (selectedCollection == null) {
+                                                    // Group books by author
+                                                    val collectionsMap = remember(state.books) {
+                                                        state.books.groupBy { it.author.ifBlank { "Khác" } }
+                                                    }
+                                                    
+                                                    if (collectionsMap.isEmpty()) {
+                                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                            Text("Không có bộ sưu tập nào", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        }
+                                                    } else {
+                                                        LazyVerticalGrid(
+                                                            columns = GridCells.Fixed(2),
+                                                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                                            verticalArrangement = Arrangement.spacedBy(20.dp),
+                                                            modifier = Modifier.fillMaxSize()
+                                                        ) {
+                                                            items(collectionsMap.keys.toList()) { author ->
+                                                                val booksInCollection = collectionsMap[author] ?: emptyList()
+                                                                Card(
+                                                                    modifier = Modifier
+                                                                        .fillMaxWidth()
+                                                                        .clickable { selectedCollection = author },
+                                                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                                                ) {
+                                                                    Column(
+                                                                        modifier = Modifier.padding(16.dp),
+                                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                                    ) {
+                                                                        Icon(
+                                                                            imageVector = Icons.Default.Folder,
+                                                                            contentDescription = null,
+                                                                            tint = MaterialTheme.colorScheme.primary,
+                                                                            modifier = Modifier.size(64.dp)
+                                                                        )
+                                                                        Spacer(modifier = Modifier.height(8.dp))
+                                                                        Text(
+                                                                            text = author,
+                                                                            fontWeight = FontWeight.Bold,
+                                                                            maxLines = 1,
+                                                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                                                            style = MaterialTheme.typography.bodyLarge
+                                                                        )
+                                                                        Text(
+                                                                            text = "${booksInCollection.size} cuốn sách",
+                                                                            style = MaterialTheme.typography.bodySmall,
+                                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    // Show books in selected author collection
+                                                    val collectionBooks = remember(state.books, selectedCollection) {
+                                                        state.books.filter { it.author.ifBlank { "Khác" } == selectedCollection }
+                                                    }
+                                                    
+                                                    LazyVerticalGrid(
+                                                        columns = GridCells.Fixed(2),
+                                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        items(collectionBooks) { book ->
+                                                            BookItem(
+                                                                book = book,
+                                                                onBookClick = onBookClick,
+                                                                isFavorite = favoriteBookIds.contains(book.id),
+                                                                onFavoriteToggle = { viewModel.toggleBookFavorite(book.id) }
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             } else {
-                                                LazyVerticalGrid(
-                                                    columns = GridCells.Fixed(2),
-                                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                                                    modifier = Modifier.fillMaxSize()
-                                                ) {
-                                                    items(filteredBooks) { book ->
-                                                        BookItem(
-                                                            book = book,
-                                                            onBookClick = onBookClick
+                                                val filteredBooks = state.books.filter { book ->
+                                                    (currentFilter == "all" || favoriteBookIds.contains(book.id)) &&
+                                                    (book.title.contains(searchQuery, ignoreCase = true) ||
+                                                     book.author.contains(searchQuery, ignoreCase = true))
+                                                }
+
+                                                if (filteredBooks.isEmpty()) {
+                                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                        Text(
+                                                            text = if (currentFilter == "favorite") "Không có sách yêu thích nào" else "Không tìm thấy sách phù hợp",
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            style = MaterialTheme.typography.bodyLarge
                                                         )
+                                                    }
+                                                } else {
+                                                    LazyVerticalGrid(
+                                                        columns = GridCells.Fixed(2),
+                                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        items(filteredBooks) { book ->
+                                                            BookItem(
+                                                                book = book,
+                                                                onBookClick = onBookClick,
+                                                                isFavorite = favoriteBookIds.contains(book.id),
+                                                                onFavoriteToggle = { viewModel.toggleBookFavorite(book.id) }
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
@@ -480,7 +624,7 @@ fun LibraryScreen(
                             }
                             3 -> {
                                 // TAB 3: SETTINGS TAB
-                                SettingsScreenContent(viewModel)
+                                SettingsScreenContent(viewModel = viewModel, onSignOut = onSignOut)
                             }
                             4 -> {
                                 // TAB 4: HIGHLIGHTS & NOTES TAB
@@ -492,44 +636,391 @@ fun LibraryScreen(
             }
         }
     }
+
+@Composable
+fun NetworkImage(
+    url: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    fallback: @Composable () -> Unit
+) {
+    var bitmap by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var failed by remember(url) { mutableStateOf(false) }
+
+    LaunchedEffect(url) {
+        if (url.startsWith("http")) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    connection.doInput = true
+                    connection.connect()
+                    val input = connection.inputStream
+                    val bmp = BitmapFactory.decodeStream(input)
+                    bitmap = bmp
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    failed = true
+                }
+            }
+        } else {
+            failed = true
+        }
+    }
+
+    val bmp = bitmap
+    if (bmp != null) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = contentScale
+        )
+    } else if (!failed) {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
+        }
+    } else {
+        fallback()
+    }
+}
+
+@Composable
+fun BookCoverCanvas(modifier: Modifier = Modifier, title: String = "") {
+    Box(modifier = modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+
+            val coverBgColor = Color(0xFF0C2133) // Elegant deep navy background
+            val borderGold = PtGoldenAccent
+
+            // Draw Cover Background
+            drawRect(color = coverBgColor)
+
+            // Draw Gold Frame Border
+            val inset = 10.dp.toPx()
+            drawRect(
+                color = borderGold.copy(alpha = 0.8f),
+                topLeft = Offset(inset, inset),
+                size = Size(width - inset * 2, height - inset * 2),
+                style = Stroke(width = 1.5.dp.toPx())
+            )
+
+            // Draw inner corner ornaments
+            val ornamentSize = 8.dp.toPx()
+            drawLine(borderGold.copy(alpha = 0.8f), Offset(inset, inset + ornamentSize), Offset(inset + ornamentSize, inset), strokeWidth = 1.dp.toPx())
+            drawLine(borderGold.copy(alpha = 0.8f), Offset(width - inset, inset + ornamentSize), Offset(width - inset - ornamentSize, inset), strokeWidth = 1.dp.toPx())
+            drawLine(borderGold.copy(alpha = 0.8f), Offset(inset, height - inset - ornamentSize), Offset(inset + ornamentSize, height - inset), strokeWidth = 1.dp.toPx())
+            drawLine(borderGold.copy(alpha = 0.8f), Offset(width - inset, height - inset - ornamentSize), Offset(width - inset - ornamentSize, height - inset), strokeWidth = 1.dp.toPx())
+
+            // Gold vintage diamond emblem in the center
+            val centerX = width / 2
+            val centerY = height / 2
+            val badgeSize = 14.dp.toPx()
+            val path = Path().apply {
+                moveTo(centerX, centerY - badgeSize)
+                lineTo(centerX + badgeSize, centerY)
+                lineTo(centerX, centerY + badgeSize)
+                lineTo(centerX - badgeSize, centerY)
+                close()
+            }
+            drawPath(path, color = borderGold, style = Stroke(width = 1.dp.toPx()))
+            drawCircle(color = borderGold, radius = 3.dp.toPx(), center = Offset(centerX, centerY))
+        }
+
+        // 3D spine shadow at left edge
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(8.dp)
+                .align(Alignment.CenterStart)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(Color.Black.copy(alpha = 0.3f), Color.Transparent)
+                    )
+                )
+        )
+
+        // Title overlay at bottom of cover
+        if (title.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color(0xFF061525).copy(alpha = 0.95f))
+                        )
+                    )
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Serif,
+                    color = PtGoldenAccent,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    lineHeight = 12.sp,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BookCover(title: String, author: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .aspectRatio(0.65f)
+            .fillMaxSize()
+            .clip(RoundedCornerShape(8.dp))
+    ) {
+        BookCoverCanvas()
+
+        // 3D book spine shadow effect
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(10.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.35f),
+                            Color.Black.copy(alpha = 0.05f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        // Overlay text title & author for high-fidelity appearance
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(24.dp)
+                    .height(1.dp)
+                    .background(PtGoldenAccent.copy(alpha = 0.6f))
+            )
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = title.uppercase(),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        lineHeight = 13.sp,
+                        color = PtGoldenAccent,
+                        textAlign = TextAlign.Center
+                    ),
+                    maxLines = 4,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                
+                Text(
+                    text = author,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        fontSize = 8.sp,
+                        color = PtGoldenAccent.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    ),
+                    maxLines = 1
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(24.dp)
+                    .height(1.dp)
+                    .background(PtGoldenAccent.copy(alpha = 0.6f))
+            )
+        }
+    }
 }
 
 @Composable
 fun BookItem(
     book: Book, 
-    onBookClick: (String) -> Unit
+    onBookClick: (String) -> Unit,
+    isFavorite: Boolean,
+    onFavoriteToggle: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+    val coverFile = remember(book.coverUrl) {
+        if (book.coverUrl.isNotEmpty() && !book.coverUrl.startsWith("http")) {
+            val f = java.io.File(book.coverUrl)
+            if (f.exists()) f else null
+        } else null
+    }
+    val bitmap = remember(coverFile) {
+        coverFile?.let {
+            try {
+                BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap()
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onBookClick(book.id) }
     ) {
-        // Custom Premium Cover using Canvas to draw
+        // Custom Premium Cover using Canvas or Bitmap
         Box(
             modifier = Modifier
                 .aspectRatio(0.65f)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .shadow(2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .shadow(
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(8.dp),
+                    clip = false,
+                    ambientColor = PtNavyPrimary.copy(alpha = 0.1f),
+                    spotColor = PtNavyPrimary.copy(alpha = 0.2f)
+                )
                 .background(MaterialTheme.colorScheme.surface)
         ) {
-            BookCoverCanvas(title = book.title)
+            if (book.coverUrl.startsWith("http")) {
+                NetworkImage(
+                    url = book.coverUrl,
+                    contentDescription = book.title,
+                    modifier = Modifier.fillMaxSize(),
+                    fallback = { BookCover(title = book.title, author = book.author) }
+                )
+            } else if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = book.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                // Left spine binding overlay on image cover
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(8.dp)
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.25f),
+                                    Color.Black.copy(alpha = 0.02f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+            } else {
+                BookCover(title = book.title, author = book.author)
+            }
+
+            // Progress percentage badge at top right
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(
+                        brush = Brush.horizontalGradient(listOf(PtGoldenAccent, Color(0xFFB38927))),
+                        shape = RoundedCornerShape(4.dp)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = "${(book.progressPercent * 100).toInt()}%",
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // Title
-        Text(
-            text = book.title,
-            style = MaterialTheme.typography.titleLarge.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface),
-            maxLines = 1
-        )
-        // Author
-        Text(
-            text = book.author,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant),
-            maxLines = 1
-        )
+        // Title & Author row with 3-dots options
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = book.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 14.sp, 
+                        fontWeight = FontWeight.Bold, 
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontFamily = FontFamily.Serif
+                    ),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = book.author,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 12.sp, 
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+
+            // Options 3-dots
+            Box {
+                IconButton(
+                    onClick = { showMenu = !showMenu },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(if (isFavorite) "Xóa khỏi Yêu thích" else "Thêm vào Yêu thích")
+                        },
+                        onClick = {
+                            onFavoriteToggle()
+                            showMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text("Thêm vào Collection")
+                        },
+                        onClick = {
+                            showMenu = false
+                        }
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(6.dp))
 
@@ -538,79 +1029,11 @@ fun BookItem(
             progress = book.progressPercent,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp)),
+                .height(3.dp)
+                .clip(RoundedCornerShape(1.5.dp)),
             color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.outline
+            trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
         )
-    }
-}
-
-@Composable
-fun BookCoverCanvas(title: String) {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val width = size.width
-        val height = size.height
-
-        // Background Color depending on Book title
-        val coverBgColor = when {
-            title.contains("Sherlock", ignoreCase = true) -> Color(0xFF0F2537)
-            title.contains("Gatsby", ignoreCase = true) -> Color(0xFF132F27)
-            title.contains("Prejudice", ignoreCase = true) -> Color(0xFFE5DEC9)
-            title.contains("Moby", ignoreCase = true) -> Color(0xFF1B2F38)
-            else -> Color(0xFF5C3A21) // Leather brown for local/imported books
-        }
-
-        val borderGold = Color(0xFFD4AF37)
-
-        // Draw Cover Background
-        drawRect(color = coverBgColor)
-
-        // Draw Gold Frame Border
-        val inset = 12.dp.toPx()
-        drawRect(
-            color = borderGold,
-            topLeft = Offset(inset, inset),
-            size = Size(width - inset * 2, height - inset * 2),
-            style = Stroke(width = 2.dp.toPx())
-        )
-
-        // Draw Internal Cover Details
-        if (title.contains("Sherlock", ignoreCase = true)) {
-            // Hat/Circle silhouette
-            drawCircle(
-                color = borderGold,
-                radius = 28.dp.toPx(),
-                center = Offset(width / 2, height / 2 - 20.dp.toPx()),
-                style = Stroke(width = 1.dp.toPx())
-            )
-        } else if (title.contains("Gatsby", ignoreCase = true)) {
-            // Art deco lines
-            val midY = height / 2 - 20.dp.toPx()
-            drawLine(borderGold, Offset(inset * 2, midY), Offset(width - inset * 2, midY), strokeWidth = 1.dp.toPx())
-            drawLine(borderGold, Offset(width / 2, inset * 2), Offset(width / 2, height - inset * 2), strokeWidth = 1.dp.toPx())
-        } else if (title.contains("Moby", ignoreCase = true)) {
-            // Wave or moon
-            drawCircle(
-                color = Color(0xFFFFF9E6),
-                radius = 18.dp.toPx(),
-                center = Offset(width / 2, height / 2 - 25.dp.toPx())
-            )
-        } else {
-            // Gold vintage diamond/shield emblem in the center for local books
-            val centerX = width / 2
-            val centerY = height / 2
-            val badgeSize = 24.dp.toPx()
-            val path = Path().apply {
-                moveTo(centerX, centerY - badgeSize)
-                lineTo(centerX + badgeSize, centerY)
-                lineTo(centerX, centerY + badgeSize)
-                lineTo(centerX - badgeSize, centerY)
-                close()
-            }
-            drawPath(path, color = borderGold, style = Stroke(width = 1.5.dp.toPx()))
-            drawCircle(color = borderGold, radius = 6.dp.toPx(), center = Offset(centerX, centerY))
-        }
     }
 }
 
@@ -619,37 +1042,38 @@ fun BookCoverCanvas(title: String) {
 fun DiscoverScreenContent() {
     var selectedCategory by remember { mutableStateOf("Tất cả") }
 
+    // Dữ liệu sách thật với ảnh bìa thật trực tuyến chất lượng cao
     val popularBooks = remember(selectedCategory) {
         when (selectedCategory) {
             "Trinh thám" -> listOf(
-                "THE ADVENTURES OF SHERLOCK HOLMES" to "Arthur Conan Doyle",
-                "Phía Sau Nghi Can X" to "Higashino Keigo",
-                "Sự Im Lặng Của Bầy Cừu" to "Thomas Harris"
+                Triple("THE ADVENTURES OF SHERLOCK HOLMES", "Arthur Conan Doyle", "https://www.gutenberg.org/cache/epub/1661/pg1661.cover.medium.jpg"),
+                Triple("Phía Sau Nghi Can X", "Higashino Keigo", "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?q=80&w=300&auto=format&fit=crop"),
+                Triple("Sự Im Lặng Của Bầy Cừu", "Thomas Harris", "https://images.unsplash.com/photo-1512820790803-83ca734da794?q=80&w=300&auto=format&fit=crop")
             )
             "Cổ điển" -> listOf(
-                "THE GREAT GATSBY" to "F. Scott Fitzgerald",
-                "PRIDE AND PREJUDICE" to "Jane Austen",
-                "War and Peace" to "Leo Tolstoy"
+                Triple("THE GREAT GATSBY", "F. Scott Fitzgerald", "https://www.gutenberg.org/cache/epub/64317/pg64317.cover.medium.jpg"),
+                Triple("PRIDE AND PREJUDICE", "Jane Austen", "https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg"),
+                Triple("War and Peace", "Leo Tolstoy", "https://www.gutenberg.org/cache/epub/2600/pg2600.cover.medium.jpg")
             )
             "Lãng mạn" -> listOf(
-                "Rừng Na Uy" to "Haruki Murakami",
-                "Kiêu Hãnh Và Định Kiến" to "Jane Austen",
-                "Romeo và Juliet" to "William Shakespeare"
+                Triple("Rừng Na Uy", "Haruki Murakami", "https://images.unsplash.com/photo-1474932430478-367db26836c1?q=80&w=300&auto=format&fit=crop"),
+                Triple("Romeo và Juliet", "William Shakespeare", "https://www.gutenberg.org/cache/epub/1513/pg1513.cover.medium.jpg"),
+                Triple("Wuthering Heights", "Emily Brontë", "https://www.gutenberg.org/cache/epub/768/pg768.cover.medium.jpg")
             )
             "Kinh tế" -> listOf(
-                "Nhà Giả Kim" to "Paulo Coelho",
-                "Đắc Nhân Tâm" to "Dale Carnegie",
-                "Cha Giàu Cha Nghèo" to "Robert Kiyosaki"
+                Triple("Nhà Giả Kim", "Paulo Coelho", "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=300&auto=format&fit=crop"),
+                Triple("Đắc Nhân Tâm", "Dale Carnegie", "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?q=80&w=300&auto=format&fit=crop"),
+                Triple("Think and Grow Rich", "Napoleon Hill", "https://images.unsplash.com/photo-1589829085413-56de8ae18c73?q=80&w=300&auto=format&fit=crop")
             )
             "Lịch sử" -> listOf(
-                "Sapiens: Lược Sử Loài Người" to "Yuval Noah Harari",
-                "Lịch Sử Văn Minh Thế Giới" to "Will Durant",
-                "Đại Việt Sử Ký Toàn Thư" to "Ngô Sĩ Liên"
+                Triple("Sapiens: Lược Sử Loài Người", "Yuval Noah Harari", "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=300&auto=format&fit=crop"),
+                Triple("Lịch Sử Văn Minh Thế Giới", "Will Durant", "https://images.unsplash.com/photo-1463320305624-91d179a990aa6?q=80&w=300&auto=format&fit=crop"),
+                Triple("The History of Herodotus", "Herodotus", "https://www.gutenberg.org/cache/epub/2707/pg2707.cover.medium.jpg")
             )
             else -> listOf(
-                "THE ADVENTURES OF SHERLOCK HOLMES" to "Arthur Conan Doyle",
-                "THE GREAT GATSBY" to "F. Scott Fitzgerald",
-                "PRIDE AND PREJUDICE" to "Jane Austen"
+                Triple("THE ADVENTURES OF SHERLOCK HOLMES", "Arthur Conan Doyle", "https://www.gutenberg.org/cache/epub/1661/pg1661.cover.medium.jpg"),
+                Triple("THE GREAT GATSBY", "F. Scott Fitzgerald", "https://www.gutenberg.org/cache/epub/64317/pg64317.cover.medium.jpg"),
+                Triple("PRIDE AND PREJUDICE", "Jane Austen", "https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg")
             )
         }
     }
@@ -657,132 +1081,273 @@ fun DiscoverScreenContent() {
     val recommendations = remember(selectedCategory) {
         when (selectedCategory) {
             "Trinh thám" -> listOf(
-                "Đề thi đẫm máu" to "Lôi Mễ",
-                "Mười người da đen nhỏ" to "Agatha Christie"
+                Triple("Đề thi đẫm máu", "Lôi Mễ", "https://images.unsplash.com/photo-1509021436665-8f07dbf5bf1d?q=80&w=300&auto=format&fit=crop"),
+                Triple("Mười người da đen nhỏ", "Agatha Christie", "https://images.unsplash.com/photo-1531988042231-d39a9cc12a9a?q=80&w=300&auto=format&fit=crop")
             )
             "Cổ điển" -> listOf(
-                "Moby Dick" to "Herman Melville",
-                "Những Người Khốn Khổ" to "Victor Hugo"
+                Triple("Moby Dick", "Herman Melville", "https://www.gutenberg.org/cache/epub/2701/pg2701.cover.medium.jpg"),
+                Triple("Những Người Khốn Khổ", "Victor Hugo", "https://images.unsplash.com/photo-1541963463532-d68292c34b19?q=80&w=300&auto=format&fit=crop")
             )
             "Lãng mạn" -> listOf(
-                "Trà hoa nữ" to "Alexandre Dumas con",
-                "Cuốn theo chiều gió" to "Margaret Mitchell"
+                Triple("Trà hoa nữ", "Alexandre Dumas con", "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=300&auto=format&fit=crop"),
+                Triple("Cuốn theo chiều gió", "Margaret Mitchell", "https://images.unsplash.com/photo-1476275466078-4007374efbbe?q=80&w=300&auto=format&fit=crop")
             )
             "Kinh tế" -> listOf(
-                "Chiến Tranh Tiền Tệ" to "Song Hongbing",
-                "Kinh tế học hài hước" to "Steven Levitt"
+                Triple("Chiến Tranh Tiền Tệ", "Song Hongbing", "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=300&auto=format&fit=crop"),
+                Triple("Kinh tế học hài hước", "Steven Levitt", "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?q=80&w=300&auto=format&fit=crop")
             )
             "Lịch sử" -> listOf(
-                "Lược sử thời gian" to "Stephen Hawking",
-                "Súng, vi trùng và thép" to "Jared Diamond"
+                Triple("Lược sử thời gian", "Stephen Hawking", "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=300&auto=format&fit=crop"),
+                Triple("Súng, vi trùng và thép", "Jared Diamond", "https://images.unsplash.com/photo-1447069387593-a5de0862481e?q=80&w=300&auto=format&fit=crop")
             )
             else -> listOf(
-                "Pride and Prejudice" to "Jane Austen",
-                "Moby Dick" to "Herman Melville",
-                "War and Peace" to "Leo Tolstoy"
+                Triple("Pride and Prejudice", "Jane Austen", "https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg"),
+                Triple("Moby Dick", "Herman Melville", "https://www.gutenberg.org/cache/epub/2701/pg2701.cover.medium.jpg"),
+                Triple("War and Peace", "Leo Tolstoy", "https://www.gutenberg.org/cache/epub/2600/pg2600.cover.medium.jpg")
             )
         }
     }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        // Trending Header
+        // Section header + Categories
         item {
-            Text(
-                text = "Khám phá Sách mới",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            )
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Thể loại",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                )
+                val categories = listOf("Tất cả", "Trinh thám", "Cổ điển", "Lãng mạn", "Kinh tế", "Lịch sử")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(categories) { category ->
+                        val isSelected = category == selectedCategory
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                .clickable { selectedCategory = category }
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = category,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            )
+                        }
+                    }
+                }
+            }
         }
 
-        // Horizontal Category Chips
+        // Popular Books Row
         item {
-            val categories = listOf("Tất cả", "Trinh thám", "Cổ điển", "Lãng mạn", "Kinh tế", "Lịch sử")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(categories) { category ->
-                    FilterChip(
-                        selected = category == selectedCategory,
-                        onClick = { selectedCategory = category },
-                        label = { Text(category) }
+            Column(
+                modifier = Modifier.padding(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Đọc nhiều nhất tuần",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
-            }
-        }
 
-        // Carousel of popular books
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "Đọc nhiều nhất tuần",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                )
+                // Lấy tối đa 6 sách cho khu vực Popular
+                val popularSixBooks = remember(popularBooks, recommendations) {
+                    val list = mutableListOf<Triple<String, String, String>>()
+                    list.addAll(popularBooks)
+                    list.addAll(recommendations)
+                    list.distinctBy { it.first }.take(6)
+                }
                 
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(popularBooks) { (title, author) ->
-                        Card(
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)
+                ) {
+                    items(popularSixBooks) { (title, author, coverUrl) ->
+                        Column(
                             modifier = Modifier
-                                .width(150.dp)
+                                .width(130.dp)
                                 .clickable {},
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            elevation = CardDefaults.cardElevation(2.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Box(
-                                    modifier = Modifier
-                                        .height(140.dp)
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(4.dp))
-                                ) {
-                                    BookCoverCanvas(title = title)
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(text = title, style = MaterialTheme.typography.titleSmall, maxLines = 1, fontWeight = FontWeight.Bold)
-                                Text(text = author, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Box(
+                                modifier = Modifier
+                                    .height(175.dp)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(10.dp))
+                            ) {
+                                NetworkImage(
+                                    url = coverUrl,
+                                    contentDescription = title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    fallback = { BookCoverCanvas(title = title) }
+                                )
                             }
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Serif
+                                ),
+                                maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = author,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Recommended Section
+        // All Books Section (Tất cả sách dạng Grid flexible)
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(
-                    text = "Đề xuất cho bạn",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    text = "Tất cả sách",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
 
-                // List style recommendations
-                recommendations.forEach { (title, author) ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {},
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(1.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(modifier = Modifier.size(50.dp, 70.dp).clip(RoundedCornerShape(4.dp))) {
-                                BookCoverCanvas(title = title)
+                // Tổng hợp toàn bộ các cuốn sách trong hệ thống mà không giới hạn số lượng
+                val allBooksList = remember(selectedCategory) {
+                    if (selectedCategory == "Tất cả") {
+                        // Nếu chọn Tất cả, gộp hết sách từ toàn bộ các category để hiển thị đầy đủ
+                        val list = mutableListOf<Triple<String, String, String>>()
+                        listOf("Trinh thám", "Cổ điển", "Lãng mạn", "Kinh tế", "Lịch sử").forEach { cat ->
+                            when (cat) {
+                                "Trinh thám" -> {
+                                    list.add(Triple("THE ADVENTURES OF SHERLOCK HOLMES", "Arthur Conan Doyle", "https://www.gutenberg.org/cache/epub/1661/pg1661.cover.medium.jpg"))
+                                    list.add(Triple("Phía Sau Nghi Can X", "Higashino Keigo", "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Sự Im Lặng Của Bầy Cừu", "Thomas Harris", "https://images.unsplash.com/photo-1512820790803-83ca734da794?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Đề thi đẫm máu", "Lôi Mễ", "https://images.unsplash.com/photo-1509021436665-8f07dbf5bf1d?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Mười người da đen nhỏ", "Agatha Christie", "https://images.unsplash.com/photo-1531988042231-d39a9cc12a9a?q=80&w=300&auto=format&fit=crop"))
+                                }
+                                "Cổ điển" -> {
+                                    list.add(Triple("THE GREAT GATSBY", "F. Scott Fitzgerald", "https://www.gutenberg.org/cache/epub/64317/pg64317.cover.medium.jpg"))
+                                    list.add(Triple("PRIDE AND PREJUDICE", "Jane Austen", "https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg"))
+                                    list.add(Triple("War and Peace", "Leo Tolstoy", "https://www.gutenberg.org/cache/epub/2600/pg2600.cover.medium.jpg"))
+                                    list.add(Triple("Moby Dick", "Herman Melville", "https://www.gutenberg.org/cache/epub/2701/pg2701.cover.medium.jpg"))
+                                    list.add(Triple("Những Người Khốn Khổ", "Victor Hugo", "https://images.unsplash.com/photo-1541963463532-d68292c34b19?q=80&w=300&auto=format&fit=crop"))
+                                }
+                                "Lãng mạn" -> {
+                                    list.add(Triple("Rừng Na Uy", "Haruki Murakami", "https://images.unsplash.com/photo-1474932430478-367db26836c1?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Romeo và Juliet", "William Shakespeare", "https://www.gutenberg.org/cache/epub/1513/pg1513.cover.medium.jpg"))
+                                    list.add(Triple("Wuthering Heights", "Emily Brontë", "https://www.gutenberg.org/cache/epub/768/pg768.cover.medium.jpg"))
+                                    list.add(Triple("Trà hoa nữ", "Alexandre Dumas con", "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Cuốn theo chiều gió", "Margaret Mitchell", "https://images.unsplash.com/photo-1476275466078-4007374efbbe?q=80&w=300&auto=format&fit=crop"))
+                                }
+                                "Kinh tế" -> {
+                                    list.add(Triple("Nhà Giả Kim", "Paulo Coelho", "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Đắc Nhân Tâm", "Dale Carnegie", "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Think and Grow Rich", "Napoleon Hill", "https://images.unsplash.com/photo-1589829085413-56de8ae18c73?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Chiến Tranh Tiền Tệ", "Song Hongbing", "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Kinh tế học hài hước", "Steven Levitt", "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?q=80&w=300&auto=format&fit=crop"))
+                                }
+                                "Lịch sử" -> {
+                                    list.add(Triple("Sapiens: Lược Sử Loài Người", "Yuval Noah Harari", "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Lịch Sử Văn Minh Thế Giới", "Will Durant", "https://images.unsplash.com/photo-1463320305624-91d179a990aa6?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("The History of Herodotus", "Herodotus", "https://www.gutenberg.org/cache/epub/2707/pg2707.cover.medium.jpg"))
+                                    list.add(Triple("Lược sử thời gian", "Stephen Hawking", "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=300&auto=format&fit=crop"))
+                                    list.add(Triple("Súng, vi trùng và thép", "Jared Diamond", "https://images.unsplash.com/photo-1447069387593-a5de0862481e?q=80&w=300&auto=format&fit=crop"))
+                                }
                             }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text(text = author, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        list.distinctBy { it.first }
+                    } else {
+                        val list = mutableListOf<Triple<String, String, String>>()
+                        list.addAll(popularBooks)
+                        list.addAll(recommendations)
+                        list.distinctBy { it.first }
+                    }
+                }
+
+                // Grid tự thích ứng chiều rộng cột tối thiểu 100.dp để tự động sắp xếp 2-4 cột tùy cỡ máy
+                val chunkedBooks = remember(allBooksList) {
+                    allBooksList.chunked(3) // Tạm thời gom nhóm thành các hàng để render hợp lệ trong LazyColumn
+                }
+
+                // Vẽ Layout dạng lưới thủ công hoặc lặp dòng với Row thích ứng vì đang nằm trong LazyColumn
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Chúng ta sử dụng Flexbox-like flow Row để tự thích ứng linh hoạt hơn
+                    // Hoặc đơn giản là dùng các Row với cân bằng trọng số (Weight)
+                    chunkedBooks.forEach { rowBooks ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            rowBooks.forEach { (title, author, coverUrl) ->
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {},
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .aspectRatio(0.7f)
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .shadow(elevation = 4.dp, shape = RoundedCornerShape(8.dp))
+                                    ) {
+                                        NetworkImage(
+                                            url = coverUrl,
+                                            contentDescription = title,
+                                            modifier = Modifier.fillMaxSize(),
+                                            fallback = { BookCoverCanvas(title = title) }
+                                        )
+                                    }
+                                    Text(
+                                        text = title,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Serif
+                                        ),
+                                        maxLines = 2,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            // Thêm các khoảng trống giả lập nếu hàng cuối cùng không đủ 3 sách để giữ cột thẳng hàng
+                            repeat(3 - rowBooks.size) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         }
+
+        // Bottom spacing
+        item { Spacer(modifier = Modifier.height(24.dp)) }
     }
 }
 
@@ -829,6 +1394,22 @@ fun ArchiveScreenContent(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         items(completedBooks) { book ->
+                            val coverFile = remember(book.coverUrl) {
+                                if (book.coverUrl.isNotEmpty() && !book.coverUrl.startsWith("http")) {
+                                    val f = java.io.File(book.coverUrl)
+                                    if (f.exists()) f else null
+                                } else null
+                            }
+                            val bitmap = remember(coverFile) {
+                                coverFile?.let {
+                                    try {
+                                        BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap()
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+                                }
+                            }
+
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -840,7 +1421,23 @@ fun ArchiveScreenContent(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(modifier = Modifier.size(60.dp, 90.dp).clip(RoundedCornerShape(4.dp))) {
-                                        BookCoverCanvas(title = book.title)
+                                        if (book.coverUrl.startsWith("http")) {
+                                            NetworkImage(
+                                                url = book.coverUrl,
+                                                contentDescription = book.title,
+                                                modifier = Modifier.fillMaxSize(),
+                                                fallback = { BookCoverCanvas(title = book.title) }
+                                            )
+                                        } else if (bitmap != null) {
+                                            Image(
+                                                bitmap = bitmap,
+                                                contentDescription = book.title,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            BookCoverCanvas(title = book.title)
+                                        }
                                     }
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column(modifier = Modifier.weight(1f)) {
@@ -875,268 +1472,29 @@ fun ArchiveScreenContent(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreenContent(viewModel: LibraryViewModel) {
+fun SettingsScreenContent(viewModel: LibraryViewModel, onSignOut: () -> Unit) {
     val settings by viewModel.userSettings.collectAsState()
     val cacheSize by viewModel.cacheSize.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
+    val userProfile by viewModel.userProfile.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
+    val bookCount = (uiState as? LibraryUiState.Success)?.books?.size ?: 0
     val context = LocalContext.current
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
-    ) {
-        Text(
-            text = "Cài đặt Ứng dụng",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        )
-
-        // --- Cloud Sync Card ---
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(text = "☁️ Đồng bộ Cloud", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-
-                // Auto sync toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Tự động đồng bộ")
-                        Text(
-                            "Đồng bộ tiến độ & highlights mỗi 6 giờ",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = settings.autoSync,
-                        onCheckedChange = { viewModel.setAutoSync(it) }
-                    )
-                }
-
-                // Sync status indicator
-                when (val s = syncState) {
-                    is LibraryViewModel.SyncState.Syncing -> {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Text(
-                                "Đang đồng bộ...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    is LibraryViewModel.SyncState.Done -> {
-                        Text(
-                            "✅ ${s.summary}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    is LibraryViewModel.SyncState.Error -> {
-                        Text(
-                            "❌ Lỗi: ${s.message}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    else -> {}
-                }
-
-                // Manual sync buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { viewModel.syncNow() },
-                        modifier = Modifier.weight(1f),
-                        enabled = syncState !is LibraryViewModel.SyncState.Syncing,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Đẩy lên", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.pullFromCloud() },
-                        modifier = Modifier.weight(1f),
-                        enabled = syncState !is LibraryViewModel.SyncState.Syncing
-                    ) {
-                        Icon(imageVector = Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Kéo về", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // --- Notification Card ---
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(text = "🔔 Thông báo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Nhắc nhở đọc sách")
-                        Text(
-                            if (settings.dailyNotify) "🟢 Đang bật — thông báo sẽ đến mỗi ngày"
-                            else "Nhắc nhở đọc sách mỗi ngày",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (settings.dailyNotify)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = settings.dailyNotify,
-                        onCheckedChange = {
-                            viewModel.setDailyNotify(it)
-                            android.widget.Toast.makeText(
-                                context,
-                                if (it) "✅ Đã bật! Thông báo sẽ đến sau ~10 giây để test" else "Đã tắt nhắc nhở",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    )
-                }
-            }
-        }
-
-        // --- Cache Card ---
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(text = "Bộ nhớ cache", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Dung lượng tải offline")
-                        Text("Đang sử dụng: $cacheSize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Button(
-                        onClick = {
-                            viewModel.clearCache()
-                            android.widget.Toast.makeText(
-                                context,
-                                "Đã xóa sạch bộ nhớ cache thành công!",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White)
-                    ) {
-                        Text("Xóa Cache", color = Color.White)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ProfileScreenContent(
-    viewModel: LibraryViewModel,
-    onBack: () -> Unit,
-    onSignOut: () -> Unit
-) {
-    val userProfile by viewModel.userProfile.collectAsState()
-    
     var nameInput by remember(userProfile) { mutableStateOf(userProfile.name) }
     var emailInput by remember(userProfile) { mutableStateOf(userProfile.email) }
     var bioInput by remember(userProfile) { mutableStateOf(userProfile.bio) }
-    
     var isEditing by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // TopAppBar for Profile
-        TopAppBar(
-            title = { Text("Hồ sơ cá nhân", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.primary)
-                }
-            },
-            actions = {
-                if (isEditing) {
-                    TextButton(
-                        onClick = {
-                            viewModel.updateUserProfile(nameInput, emailInput, bioInput)
-                            isEditing = false
-                        }
-                    ) {
-                        Text("Lưu", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
-                } else {
-                    TextButton(onClick = { isEditing = true }) {
-                        Text("Sửa", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            // Avatar
-            Box(
-                modifier = Modifier
-                    .size(96.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = nameInput.firstOrNull()?.uppercase() ?: "U",
-                    fontSize = 40.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
-
-            // Information fields
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                if (isEditing) {
+    // Dialog chỉnh sửa thông tin nhanh
+    if (isEditing) {
+        AlertDialog(
+            onDismissRequest = { isEditing = false },
+            title = { Text("Chỉnh sửa trang cá nhân", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = nameInput,
                         onValueChange = { nameInput = it },
@@ -1152,57 +1510,570 @@ fun ProfileScreenContent(
                     OutlinedTextField(
                         value = bioInput,
                         onValueChange = { bioInput = it },
-                        label = { Text("Giới thiệu bản thân") },
+                        label = { Text("Giới thiệu") },
                         modifier = Modifier.fillMaxWidth(),
-                        maxLines = 3
+                        maxLines = 2
                     )
-                } else {
-                    Card(
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.updateUserProfile(nameInput, emailInput, bioInput)
+                    isEditing = false
+                }) {
+                    Text("Lưu", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { isEditing = false }) {
+                    Text("Hủy")
+                }
+            }
+        )
+    }
+
+    // Modal con xử lý từng mục cấu hình (Dialogs)
+    var activeDialog by remember { mutableStateOf<String?>(null) } // "notifications", "goals", "notes", "sync", "preferences"
+
+    if (activeDialog == "notifications") {
+        AlertDialog(
+            onDismissRequest = { activeDialog = null },
+            title = { Text("Thông báo nhắc nhở", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            ProfileInfoItem(label = "Họ và Tên", value = userProfile.name)
-                            Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                            ProfileInfoItem(label = "Email Tài khoản", value = viewModel.userEmail.ifBlank { userProfile.email.ifBlank { "Chưa cập nhật" } })
-                            Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                            ProfileInfoItem(label = "Giới thiệu", value = userProfile.bio.ifBlank { "Chưa có giới thiệu" })
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Bật nhắc nhở đọc sách", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Nhắc nhở đọc sách định kỳ mỗi ngày",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = settings.dailyNotify,
+                            onCheckedChange = { viewModel.setDailyNotify(it) }
+                        )
+                    }
+
+                    if (settings.dailyNotify) {
+                        Divider()
+                        // Hằng ngày / Theo chu kỳ
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable { viewModel.setReminderMode("daily") }
+                            ) {
+                                RadioButton(selected = settings.reminderMode == "daily", onClick = { viewModel.setReminderMode("daily") })
+                                Text("Hằng ngày")
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable { viewModel.setReminderMode("interval") }
+                            ) {
+                                RadioButton(selected = settings.reminderMode == "interval", onClick = { viewModel.setReminderMode("interval") })
+                                Text("Theo chu kỳ")
+                            }
+                        }
+
+                        if (settings.reminderMode == "daily") {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Giờ nhắc:")
+                                val timePicker = remember(settings.reminderHour, settings.reminderMinute) {
+                                    android.app.TimePickerDialog(context, { _, h, m -> viewModel.setReminderTime(h, m) }, settings.reminderHour, settings.reminderMinute, true)
+                                }
+                                OutlinedButton(onClick = { timePicker.show() }) {
+                                    Text(String.format("%02d:%02d", settings.reminderHour, settings.reminderMinute))
+                                }
+                            }
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Mỗi:")
+                                OutlinedTextField(
+                                    value = if (settings.reminderIntervalVal == 0) "" else settings.reminderIntervalVal.toString(),
+                                    onValueChange = {
+                                        val num = it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
+                                        viewModel.setReminderIntervalVal(num)
+                                    },
+                                    modifier = Modifier.width(70.dp),
+                                    singleLine = true
+                                )
+                                Text("phút")
+                            }
                         }
                     }
                 }
+            },
+            confirmButton = {
+                Button(onClick = { activeDialog = null }) {
+                    Text("Đóng", color = Color.White)
+                }
             }
+        )
+    }
 
-            Spacer(modifier = Modifier.weight(1f))
+    if (activeDialog == "goals") {
+        AlertDialog(
+            onDismissRequest = { activeDialog = null },
+            title = { Text("Mục tiêu đọc sách", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("Đặt mục tiêu số phút đọc sách mỗi ngày để hình thành thói quen tốt:")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        var goalMinutes by remember { mutableStateOf(30) }
+                        Slider(
+                            value = goalMinutes.toFloat(),
+                            onValueChange = { goalMinutes = it.toInt() },
+                            valueRange = 5f..120f,
+                            steps = 23,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("$goalMinutes phút", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { activeDialog = null }) {
+                    Text("Đồng ý", color = Color.White)
+                }
+            }
+        )
+    }
 
-            // Logout Button
-            Button(
-                onClick = {
+    if (activeDialog == "sync") {
+        AlertDialog(
+            onDismissRequest = { activeDialog = null },
+            title = { Text("Đồng bộ Cloud & Cache", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Tự động đồng bộ", fontWeight = FontWeight.Bold)
+                            Text("Tải tiến độ lên đám mây tự động", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = settings.autoSync, onCheckedChange = { viewModel.setAutoSync(it) })
+                    }
+                    
+                    Divider()
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = { viewModel.syncNow() },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("Đẩy lên", color = Color.White)
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.pullFromCloud() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Kéo về")
+                        }
+                    }
+
+                    Divider()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Bộ nhớ đệm Offline", fontWeight = FontWeight.Bold)
+                            Text("Đang dùng: $cacheSize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.clearCache()
+                                android.widget.Toast.makeText(context, "Đã xóa sạch bộ nhớ cache!", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Xóa Cache")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { activeDialog = null }) {
+                    Text("Đóng", color = Color.White)
+                }
+            }
+        )
+    }
+
+    if (activeDialog == "notes") {
+        AlertDialog(
+            onDismissRequest = { activeDialog = null },
+            title = { Text("Xuất ghi chú & Highlights", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Hệ thống hỗ trợ trích xuất toàn bộ các đoạn văn được highlight và ghi chú đã tạo sang các định dạng tài liệu phổ biến:")
+                    Button(
+                        onClick = {
+                            android.widget.Toast.makeText(context, "Đang chuẩn bị tệp tin TXT trích xuất...", android.widget.Toast.LENGTH_SHORT).show()
+                            activeDialog = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Xuất sang Text (.txt)", color = Color.White)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            android.widget.Toast.makeText(context, "Đang chuẩn bị tệp tin JSON...", android.widget.Toast.LENGTH_SHORT).show()
+                            activeDialog = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Xuất sang JSON (.json)")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activeDialog = null }) {
+                    Text("Đóng")
+                }
+            }
+        )
+    }
+
+    if (activeDialog == "preferences") {
+        AlertDialog(
+            onDismissRequest = { activeDialog = null },
+            title = { Text("Tùy chọn đọc sách", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Cỡ chữ mặc định
+                    Text("Cỡ chữ mặc định trong trình đọc:")
+                    var fontSizeVal by remember { mutableStateOf(18f) }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Slider(
+                            value = fontSizeVal,
+                            onValueChange = { fontSizeVal = it },
+                            valueRange = 12f..32f,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("${fontSizeVal.toInt()} sp", fontWeight = FontWeight.Bold)
+                    }
+
+                    Divider()
+
+                    // Font chữ
+                    Text("Font chữ ưu tiên:")
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        listOf("Serif", "Sans-Serif", "Monospace").forEach { f ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable {
+                                        android.widget.Toast.makeText(context, "Đã chọn font $f làm mặc định", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text(f, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { activeDialog = null }) {
+                    Text("Hoàn tất", color = Color.White)
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .background(Color(0xFF0F0F0F)) // Dark background tương tự ảnh mẫu
+            .padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // --- AVATAR & NAME HEADER ---
+        Box(
+            modifier = Modifier.size(110.dp),
+            contentAlignment = Alignment.BottomEnd
+        ) {
+            // Avatar Circle
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(PtGoldGradientStart, PtGoldGradientEnd)
+                        )
+                    )
+                    .border(3.dp, Color(0xFFE5A93B), CircleShape), // Viền vàng như ảnh mẫu
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = userProfile.name.firstOrNull()?.uppercase() ?: "U",
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 44.sp,
+                        fontFamily = FontFamily.Serif
+                    )
+                )
+            }
+            // Edit Floating button on avatar
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE5A93B))
+                    .border(1.5.dp, Color(0xFF0F0F0F), CircleShape)
+                    .clickable { isEditing = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit Profile",
+                    tint = Color(0xFF0F0F0F),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Name & Email
+        Text(
+            text = userProfile.name,
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = viewModel.userEmail.ifBlank { userProfile.email.ifBlank { "anvo@gmail.com" } },
+            style = MaterialTheme.typography.bodyMedium.copy(
+                color = Color.Gray
+            )
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- STATS ROW (Books, Pages Read, Highlights) ---
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "$bookCount",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                )
+                Text(text = "Books", style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "3,241",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                )
+                Text(text = "Pages Read", style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "47",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                )
+                Text(text = "Highlights", style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- READING STREAK CARD ---
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF1A1713)) // Màu nâu tối ấm áp cho Streak card
+                .border(1.dp, Color(0xFFE5A93B).copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Reading Streak",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = Color.White)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "14",
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE5A93B)
+                    )
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("day streak", style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+                    Text("Last 14 days", style = MaterialTheme.typography.labelSmall.copy(color = Color.Gray))
+                }
+                
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Custom Visual Indicator for Streak days
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(7) { idx ->
+                        Box(
+                            modifier = Modifier
+                                .size(width = 8.dp, height = 24.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    if (idx < 5) Color(0xFFE5A93B) // Ngày đã đạt streak
+                                    else Color(0xFFE5A93B).copy(alpha = 0.2f) // Ngày chưa đạt
+                                )
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- SETTINGS SECTION TITLE ---
+        Text(
+            text = "Settings",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White),
+            textAlign = TextAlign.Start
+        )
+
+        // --- 5 SETTINGS ITEMS LIST ---
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF1E1E1E)),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            val listItems = listOf(
+                Triple("Notifications", Icons.Default.Notifications, "notifications"),
+                Triple("Reading Goals", Icons.Default.TrendingUp, "goals"),
+                Triple("Export Notes", Icons.Default.Edit, "notes"),
+                Triple("Device Sync", Icons.Default.CloudSync, "sync"),
+                Triple("Preferences", Icons.Default.Tune, "preferences")
+            )
+
+            listItems.forEach { (title, icon, actionKey) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { activeDialog = actionKey }
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = title,
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.bodyLarge.copy(color = Color.White)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Go",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                
+                // Kẻ đường ngăn cách nhẹ trừ mục cuối cùng
+                if (actionKey != "preferences") {
+                    Divider(color = Color(0xFF2C2C2C), thickness = 0.5.dp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // --- SIGN OUT BUTTON (DARK BORDER & RED TEXT) ---
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .height(52.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Transparent)
+                .border(1.dp, Color(0xFFD32F2F).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                .clickable {
                     viewModel.signOut()
                     onSignOut()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .clip(RoundedCornerShape(12.dp))
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(imageVector = Icons.Default.Logout, contentDescription = "Đăng xuất")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Đăng xuất tài khoản", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Icon(
+                    imageVector = Icons.Default.Logout,
+                    contentDescription = "Sign Out",
+                    tint = Color(0xFFEF5350)
+                )
+                Text(
+                    text = "Sign Out",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        color = Color(0xFFEF5350),
+                        fontWeight = FontWeight.Bold
+                    )
+                )
             }
         }
-    }
-}
-
-@Composable
-fun ProfileInfoItem(label: String, value: String) {
-    Column {
-        Text(text = label, style = MaterialTheme.typography.labelMedium, color = PtTextSecondary)
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(text = value, style = MaterialTheme.typography.bodyLarge, color = PtTextMain, fontWeight = FontWeight.Medium)
+        
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
@@ -1377,121 +2248,224 @@ fun HighlightsScreenContent(viewModel: LibraryViewModel, onBookClick: (String) -
         )
     }
 
+    var selectedBookId by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "Ghi chú & Highlight",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = PtTextNavy)
-        )
+        val currentBookId = selectedBookId
+        if (currentBookId == null) {
+            Text(
+                text = "Ghi chú & Highlight",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = PtTextNavy)
+            )
 
-        if (highlights.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("📝", fontSize = 48.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Chưa có highlight hay ghi chú nào.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = PtTextSecondary
-                      )
+            if (highlights.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("📝", fontSize = 48.sp)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Chưa có highlight hay ghi chú nào.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = PtTextSecondary
+                        )
+                    }
                 }
-            }
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(highlights) { highlight ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                editingHighlight = highlight
-                                noteTextState = highlight.noteText ?: ""
-                                colorHexState = highlight.colorHex
-                                showEditDialog = true
-                            },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val bookLabel = bookTitles[highlight.bookId] ?: when (highlight.bookId) {
-                                    "1" -> "Sherlock Holmes"
-                                    "2" -> "The Great Gatsby"
-                                    "3" -> "Pride and Prejudice"
-                                    "4" -> "Moby Dick"
-                                    else -> "Tài liệu Local"
-                                }
-                                Text(
-                                    text = "$bookLabel - Chương ${highlight.chapterNumber}, Đoạn ${highlight.startOffset + 1}",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = PtNavyPrimary)
-                                )
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(android.graphics.Color.parseColor(highlight.colorHex)))
-                                )
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    val grouped = highlights.groupBy { it.bookId }
+                    grouped.forEach { (bookId, bookHighlights) ->
+                        val bookLabel = bookTitles[bookId] ?: when (bookId) {
+                            "1" -> "Sherlock Holmes"
+                            "2" -> "The Great Gatsby"
+                            "3" -> "Pride and Prejudice"
+                            "4" -> "Moby Dick"
+                            else -> {
+                                if (bookId.startsWith("local_")) "Tài liệu Local" else bookId
                             }
+                        }
 
-                            val textToDisplay = if (!highlight.selectedText.isNullOrBlank()) highlight.selectedText else "Đoạn văn được highlight"
-                            Box(
+                        item {
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp))
-                                    .padding(8.dp)
+                                    .clickable { selectedBookId = bookId },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                             ) {
-                                Text(
-                                    text = "\"$textToDisplay\"",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontStyle = FontStyle.Italic,
-                                        fontFamily = FontFamily.Serif
-                                    ),
-                                    color = PtTextMain
-                                )
-                            }
-
-                            if (!highlight.noteText.isNullOrBlank()) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.Top
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text("📝 ", fontSize = 14.sp)
-                                    Text(
-                                        text = "Ghi chú: ${highlight.noteText}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = PtTextSecondary
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Book,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                text = bookLabel,
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = PtTextMain
+                                            )
+                                            Text(
+                                                text = "${bookHighlights.size} ghi chú & highlight",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = PtTextSecondary
+                                            )
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.ChevronRight,
+                                        contentDescription = null,
+                                        tint = PtTextSecondary
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        } else {
+            val bookHighlights = highlights.filter { it.bookId == currentBookId }
+            val bookLabel = bookTitles[currentBookId] ?: when (currentBookId) {
+                "1" -> "Sherlock Holmes"
+                "2" -> "The Great Gatsby"
+                "3" -> "Pride and Prejudice"
+                "4" -> "Moby Dick"
+                else -> {
+                    if (currentBookId.startsWith("local_")) "Tài liệu Local" else currentBookId
+                }
+            }
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                IconButton(onClick = { selectedBookId = null }) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = bookLabel,
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = PtTextNavy),
+                    maxLines = 1
+                )
+            }
+
+            if (bookHighlights.isEmpty()) {
+                LaunchedEffect(Unit) {
+                    selectedBookId = null
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(bookHighlights) { highlight ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    editingHighlight = highlight
+                                    noteTextState = highlight.noteText ?: ""
+                                    colorHexState = highlight.colorHex
+                                    showEditDialog = true
+                                },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                TextButton(
-                                    onClick = { viewModel.deleteHighlight(highlight.id) },
-                                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(imageVector = Icons.Default.Delete, contentDescription = "Xóa", modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Xóa ghi nhớ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "Chương ${highlight.chapterNumber}, Đoạn ${highlight.startOffset + 1}",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = PtNavyPrimary)
+                                    )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(android.graphics.Color.parseColor(highlight.colorHex)))
+                                    )
+                                }
+
+                                val textToDisplay = if (!highlight.selectedText.isNullOrBlank()) highlight.selectedText else "Đoạn văn được highlight"
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(android.graphics.Color.parseColor(highlight.colorHex)).copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp))
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = "\"$textToDisplay\"",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontStyle = FontStyle.Italic,
+                                            fontFamily = FontFamily.Serif
+                                        ),
+                                        color = PtTextMain
+                                    )
+                                }
+
+                                if (!highlight.noteText.isNullOrBlank()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Text("📝 ", fontSize = 14.sp)
+                                        Text(
+                                            text = "Ghi chú: ${highlight.noteText}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = PtTextSecondary
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(
+                                        onClick = { viewModel.deleteHighlight(highlight.id) },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Xóa",
+                                            tint = Color.Red,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Xóa ghi nhớ", color = Color.Red, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -1791,10 +2765,16 @@ fun stripHtml(html: String): String {
             // Empty line = paragraph boundary
             val built = currentParagraph.toString().trim()
             if (built.isNotEmpty()) {
-                paragraphs.add(built)
+                if (!built.matches(Regex("\\d+"))) {
+                    paragraphs.add(built)
+                }
                 currentParagraph.clear()
             }
         } else {
+            // Skip standalone page numbers on a line
+            if (trimmed.matches(Regex("\\d+"))) {
+                continue
+            }
             // Append to current paragraph with space
             if (currentParagraph.isNotEmpty()) currentParagraph.append(" ")
             currentParagraph.append(trimmed)
@@ -1802,11 +2782,126 @@ fun stripHtml(html: String): String {
     }
     // Flush final paragraph
     val built = currentParagraph.toString().trim()
-    if (built.isNotEmpty()) {
+    if (built.isNotEmpty() && !built.matches(Regex("\\d+"))) {
         paragraphs.add(built)
     }
 
     // Join paragraphs with double newline for reader to split on
     return paragraphs.joinToString("\n\n")
 }
+
+fun parseEpubMetadata(context: android.content.Context, uri: Uri): Triple<String, String, String> {
+    var title = ""
+    var author = ""
+    var coverPath = ""
+    var tempFile: java.io.File? = null
+    try {
+        tempFile = java.io.File.createTempFile("epub_meta_", ".epub", context.cacheDir)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            tempFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        val zipFile = java.util.zip.ZipFile(tempFile)
+        var opfPath = ""
+        val containerEntry = zipFile.getEntry("META-INF/container.xml")
+        if (containerEntry != null) {
+            val containerContent = zipFile.getInputStream(containerEntry).bufferedReader().use { it.readText() }
+            val matcher = java.util.regex.Pattern.compile("<rootfile\\s+[^>]*full-path=\"([^\"]+)\"", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(containerContent)
+            if (matcher.find()) {
+                opfPath = matcher.group(1)
+            }
+        }
+        if (opfPath.isEmpty()) {
+            val entries = zipFile.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                if (entry.name.endsWith(".opf", ignoreCase = true)) {
+                    opfPath = entry.name
+                    break
+                }
+            }
+        }
+
+        if (opfPath.isNotEmpty()) {
+            val opfEntry = zipFile.getEntry(opfPath)
+            if (opfEntry != null) {
+                val opfContent = zipFile.getInputStream(opfEntry).bufferedReader().use { it.readText() }
+                // Parse Title
+                val titleMatcher = java.util.regex.Pattern.compile("<dc:title[^>]*>([^<]+)</dc:title>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(opfContent)
+                if (titleMatcher.find()) {
+                    title = titleMatcher.group(1).trim()
+                }
+                // Parse Author
+                val authorMatcher = java.util.regex.Pattern.compile("<dc:creator[^>]*>([^<]+)</dc:creator>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(opfContent)
+                if (authorMatcher.find()) {
+                    author = authorMatcher.group(1).trim()
+                }
+
+                // Find Cover Image ID from meta tag or item properties
+                var coverId = ""
+                val metaMatcher = java.util.regex.Pattern.compile("<meta\\s+[^>]*name=\"cover\"\\s+[^>]*content=\"([^\"]+)\"", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(opfContent)
+                if (metaMatcher.find()) {
+                    coverId = metaMatcher.group(1)
+                }
+
+                val manifestItems = mutableMapOf<String, String>() // id -> href
+                val itemMatcher = java.util.regex.Pattern.compile("<item\\s+[^>]*id=\"([^\"]+)\"[^>]*href=\"([^\"]+)\"", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(opfContent)
+                while (itemMatcher.find()) {
+                    manifestItems[itemMatcher.group(1)] = itemMatcher.group(2)
+                }
+
+                var coverHref = ""
+                if (coverId.isNotEmpty()) {
+                    coverHref = manifestItems[coverId] ?: ""
+                }
+                if (coverHref.isEmpty()) {
+                    // Fallback to searching item properties="cover-image"
+                    val propMatcher = java.util.regex.Pattern.compile("<item\\s+[^>]*properties=\"cover-image\"[^>]*href=\"([^\"]+)\"", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(opfContent)
+                    if (propMatcher.find()) {
+                        coverHref = propMatcher.group(1)
+                    }
+                }
+                if (coverHref.isEmpty()) {
+                    // Fallback to searching id="cover" or id="cover-image"
+                    coverHref = manifestItems["cover"] ?: manifestItems["cover-image"] ?: ""
+                }
+                if (coverHref.isEmpty()) {
+                    // Fallback to searching href that contains "cover" and has image extension
+                    for ((_, href) in manifestItems) {
+                        if (href.lowercase().contains("cover") && (href.endsWith(".jpg") || href.endsWith(".jpeg") || href.endsWith(".png"))) {
+                            coverHref = href
+                            break
+                        }
+                    }
+                }
+
+                if (coverHref.isNotEmpty()) {
+                    val opfDir = if (opfPath.contains("/")) opfPath.substringBeforeLast("/") + "/" else ""
+                    val decodedHref = java.net.URLDecoder.decode(coverHref, java.nio.charset.StandardCharsets.UTF_8.name())
+                    val coverImgPathInsideZip = if (decodedHref.startsWith("/")) decodedHref.drop(1) else "$opfDir$decodedHref"
+                    val zipEntry = zipFile.getEntry(coverImgPathInsideZip) ?: zipFile.getEntry(coverImgPathInsideZip.replace("\\", "/"))
+                    if (zipEntry != null) {
+                        val coversDir = java.io.File(context.filesDir, "covers")
+                        if (!coversDir.exists()) coversDir.mkdirs()
+                        val coverFile = java.io.File(coversDir, "cover_${System.currentTimeMillis()}.jpg")
+                        zipFile.getInputStream(zipEntry).use { input ->
+                            coverFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        coverPath = coverFile.absolutePath
+                    }
+                }
+            }
+        }
+        zipFile.close()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    } finally {
+        try { tempFile?.delete() } catch(e: Exception) {}
+    }
+    return Triple(title, author, coverPath)
+}
+
 

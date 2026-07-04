@@ -9,8 +9,18 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.*
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 object NotificationHelper {
+
+    private val helperScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var reminderJob: Job? = null
 
     const val CHANNEL_ID = "pageturn_daily_reminder"
     const val CHANNEL_NAME = "Nhắc nhở đọc sách"
@@ -31,18 +41,32 @@ object NotificationHelper {
      * Schedule daily reminder — fires every 24h from now.
      * Safe to call multiple times (ExistingPeriodicWorkPolicy.UPDATE re-queues if needed).
      */
-    fun scheduleDailyReminder(context: Context) {
+    fun scheduleDailyReminder(context: Context, hour: Int, minute: Int) {
         createChannel(context)
 
+        val calendar = java.util.Calendar.getInstance()
+        val nowMillis = calendar.timeInMillis
+
+        val targetCalendar = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, hour)
+            set(java.util.Calendar.MINUTE, minute)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+
+        if (targetCalendar.timeInMillis <= nowMillis) {
+            targetCalendar.add(java.util.Calendar.DAY_OF_YEAR, 1)
+        }
+
+        val delayMillis = targetCalendar.timeInMillis - nowMillis
+
         val request = PeriodicWorkRequestBuilder<DailyReminderWorker>(24, TimeUnit.HOURS)
-            // Minimum interval for testing: swap to 15 minutes for quick test
-            // PeriodicWorkRequestBuilder<DailyReminderWorker>(15, TimeUnit.MINUTES)
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
                     .build()
             )
-            .setInitialDelay(10, TimeUnit.SECONDS) // fire 10s after enable for easy testing
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
             .build()
 
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -52,8 +76,57 @@ object NotificationHelper {
         )
     }
 
+    fun scheduleIntervalReminder(context: Context, intervalVal: Int, intervalUnit: String, isRescheduling: Boolean = false) {
+        if (!isRescheduling) {
+            cancelDailyReminder(context)
+        }
+        createChannel(context)
+
+        val durationMs = when (intervalUnit) {
+            "seconds" -> intervalVal.toLong() * 1000
+            "minutes" -> intervalVal.toLong() * 60 * 1000
+            "hours" -> intervalVal.toLong() * 60 * 60 * 1000
+            else -> intervalVal.toLong() * 60 * 1000
+        }
+
+        val isShortInterval = intervalUnit == "seconds" || (intervalUnit == "minutes" && intervalVal < 15)
+
+        if (isShortInterval) {
+            reminderJob?.cancel()
+            reminderJob = helperScope.launch {
+                while (isActive) {
+                    delay(durationMs)
+                    showDailyReminderNotification(context)
+                }
+            }
+        } else {
+            val intervalMins = when (intervalUnit) {
+                "hours" -> intervalVal.toLong() * 60
+                else -> intervalVal.toLong()
+            }
+            val request = PeriodicWorkRequestBuilder<DailyReminderWorker>(intervalMins, TimeUnit.MINUTES)
+                .addTag("reminder_tag")
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+                        .build()
+                )
+                .setInitialDelay(10, TimeUnit.SECONDS)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WORK_NAME_DAILY,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                request
+            )
+        }
+    }
+
     fun cancelDailyReminder(context: Context) {
+        reminderJob?.cancel()
+        reminderJob = null
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME_DAILY)
+        WorkManager.getInstance(context).cancelAllWorkByTag("reminder_tag")
     }
 
     /**
