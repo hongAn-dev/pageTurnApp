@@ -21,14 +21,14 @@ class RetrofitPageTurnNetworkApi @Inject constructor(
             val libraryList = response.data ?: emptyList()
             libraryList.map { dto ->
                 Book(
-                    id = dto.bookHash,
+                    id = dto.id.toString(),
                     title = dto.title,
-                    author = dto.author,
+                    author = dto.author.ifBlank { "Tác giả ẩn danh" },
                     coverUrl = dto.coverUrl ?: "",
                     progressPercent = 0f,
                     totalPages = 100,
                     currentPage = 0,
-                    description = dto.description ?: ""
+                    description = "Đã đồng bộ từ server"
                 )
             }
         } catch (e: Exception) {
@@ -39,17 +39,17 @@ class RetrofitPageTurnNetworkApi @Inject constructor(
     override suspend fun getBookDetails(bookId: String): Book {
         val response = syncService.getLibrary()
         val libraryList = response.data ?: emptyList()
-        val dto = libraryList.firstOrNull { it.bookHash == bookId }
+        val dto = libraryList.firstOrNull { it.id.toString() == bookId }
         if (dto != null) {
             return Book(
-                id = dto.bookHash,
+                id = dto.id.toString(),
                 title = dto.title,
-                author = dto.author,
+                author = dto.author.ifBlank { "Tác giả ẩn danh" },
                 coverUrl = dto.coverUrl ?: "",
                 progressPercent = 0f,
                 totalPages = 100,
                 currentPage = 0,
-                description = dto.description ?: ""
+                description = "Đã đồng bộ từ server"
             )
         }
         throw NoSuchElementException("Book not found in library: $bookId")

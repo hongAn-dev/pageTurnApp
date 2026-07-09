@@ -1,31 +1,47 @@
 package com.pageturn.core.network.api
 
 import kotlinx.serialization.Serializable
+import okhttp3.MultipartBody
 import retrofit2.Response
 import retrofit2.http.*
 
 @Serializable
 data class BookMetadataDto(
-    val bookHash: String,
+    val id: Long? = null,
     val title: String,
-    val author: String,
-    val fileFormat: String
+    val authors: List<String> = emptyList(),
+    val fileFormat: String? = null
 )
 
 @Serializable
 data class BookResponseDto(
-    val id: String? = null,
-    val bookHash: String,
+    val id: Long,
     val title: String,
-    val author: String,
+    val authors: List<String> = emptyList(),
+    val fileFormat: String? = null,
     val coverUrl: String? = null,
     val fileUrl: String? = null,
-    val description: String? = null
+    val fileSize: Long = 0,
+    val cloudSynced: Boolean = false,
+    val addedAt: String? = null,
+    val updatedAt: String? = null
+) {
+    val author: String get() = authors.joinToString(", ")
+}
+
+@Serializable
+data class UploadBookResponseDto(
+    val id: Long,
+    val fileUrl: String? = null,
+    val publicId: String? = null,
+    val fileFormat: String? = null,
+    val fileSize: Long = 0,
+    val cloudSynced: Boolean = false
 )
 
 @Serializable
 data class ProgressDto(
-    val bookHash: String,
+    val bookId: Long,
     val chapterIdx: Int,
     val scrollPct: Float,
     val updatedAt: String? = null
@@ -33,33 +49,41 @@ data class ProgressDto(
 
 @Serializable
 data class BookmarkDto(
-    val id: String? = null,
-    val bookHash: String,
+    val id: Long? = null,
+    val bookId: Long,
     val chapterIdx: Int,
     val scrollPct: Float,
     val snippet: String,
-    val updatedAt: String? = null
+    val updatedAt: String? = null,
+    val isDeleted: Boolean = false
 )
 
 @Serializable
 data class HighlightDto(
-    val id: String? = null,
-    val bookHash: String,
+    val id: Long? = null,
+    val bookId: Long,
     val chapterIdx: Int,
     val startOffset: Int,
     val endOffset: Int,
     val textContent: String,
     val color: String,
     val note: String,
-    val updatedAt: String? = null
+    val updatedAt: String? = null,
+    val isDeleted: Boolean = false
+)
+
+@Serializable
+data class CollectionBookItemDto(
+    val bookId: Long,
+    val position: Int = 0
 )
 
 @Serializable
 data class CollectionDto(
-    val id: String? = null,
+    val id: Long? = null,
     val name: String,
     val description: String,
-    val books: List<String> = emptyList(),
+    val books: List<CollectionBookItemDto> = emptyList(),
     val updatedAt: String? = null
 )
 
@@ -100,9 +124,9 @@ data class SyncPullResponse(
 
 @Serializable
 data class SyncDeletesRequest(
-    val bookmarkIds: List<String> = emptyList(),
-    val highlightIds: List<String> = emptyList(),
-    val collectionIds: List<String> = emptyList()
+    val bookmarkIds: List<Long> = emptyList(),
+    val highlightIds: List<Long> = emptyList(),
+    val collectionIds: List<Long> = emptyList()
 )
 
 @Serializable
@@ -154,6 +178,13 @@ interface BackendSyncService {
 
     @POST("api/library")
     suspend fun upsertBookMetadata(@Body request: BookMetadataDto): ApiResponse<BookResponseDto>
+
+    @Multipart
+    @POST("api/library/{bookId}/upload")
+    suspend fun uploadBookFile(
+        @Path("bookId") bookId: Long,
+        @Part file: MultipartBody.Part
+    ): ApiResponse<UploadBookResponseDto>
 
     @DELETE("api/library/{bookHash}")
     suspend fun deleteBook(

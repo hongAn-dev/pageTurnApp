@@ -6,12 +6,12 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -62,6 +63,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.unit.Density
@@ -82,11 +84,7 @@ fun ReaderScreen(
             controller.hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
         }
         onDispose {
-            val window = (context as? android.app.Activity)?.window
-            if (window != null) {
-                val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-                controller.show(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
-            }
+            // MainActivity owns immersive mode for the whole app, so do not show system bars when leaving reader.
         }
     }
 
@@ -103,15 +101,14 @@ fun ReaderScreen(
     var selectedParagraphText by remember { mutableStateOf("") }
     var showParagraphActions by remember { mutableStateOf(false) }
     var showQuoteCardDialog by remember { mutableStateOf(false) }
-    var showAddNoteDialog by remember { mutableStateOf(false) }
     var noteInputText by remember { mutableStateOf("") }
+    var noteTagInputText by remember { mutableStateOf("") }
     var customHighlightText by remember { mutableStateOf("") }
     
     var showColorPickerSheet by remember { mutableStateOf(false) }
     var activeSelectedText by remember { mutableStateOf("") }
     var activeParagraphIndex by remember { mutableStateOf(-1) }
     var activeSelectedStartChar by remember { mutableStateOf(0) }
-    var activeNoteColor by remember { mutableStateOf("#FFF176") }
 
     LaunchedEffect(selectedParagraphText) {
         // Do NOT auto-fill the highlight text field - user should select/type what they want
@@ -317,21 +314,6 @@ fun ReaderScreen(
                 ) {
                     Button(
                         onClick = {
-                            noteInputText = ""
-                            showAddNoteDialog = true
-                            showParagraphActions = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = currentButtonContainerColor, contentColor = currentButtonContentColor),
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = currentButtonContentColor)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Ghi chú", color = currentButtonContentColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    Button(
-                        onClick = {
                             showQuoteCardDialog = true
                             showParagraphActions = false
                         },
@@ -360,78 +342,6 @@ fun ReaderScreen(
                 }
             }
         }
-    }
-
-    // Add note dialog
-    if (showAddNoteDialog) {
-        AlertDialog(
-            onDismissRequest = { showAddNoteDialog = false },
-            title = { Text("Thêm Ghi chú cho đoạn văn", color = currentTextColor) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    OutlinedTextField(
-                        value = noteInputText,
-                        onValueChange = { noteInputText = it },
-                        label = { Text("Nội dung ghi chú...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = currentTextColor,
-                            unfocusedTextColor = currentTextColor
-                        )
-                    )
-                    
-                    Text("Màu đánh dấu:", style = MaterialTheme.typography.bodyMedium, color = currentTextColor)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val noteColors = listOf("#FFF176", "#A5D6A7", "#F48FB1", "#90CAF9")
-                        noteColors.forEach { colorStr ->
-                            val colorValue = Color(android.graphics.Color.parseColor(colorStr))
-                            val isSelected = activeNoteColor == colorStr
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(colorValue)
-                                    .border(
-                                        width = if (isSelected) 2.dp else 0.dp,
-                                        color = if (isSelected) PtNavyPrimary else Color.Transparent,
-                                        shape = CircleShape
-                                    )
-                                    .clickable { activeNoteColor = colorStr }
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.addHighlight(
-                            chapterNumber = (uiState as? ReaderUiState.Success)?.chapter?.chapterNumber ?: 1,
-                            startOffset = selectedParagraphIndex,
-                            endOffset = activeSelectedStartChar,
-                            colorHex = activeNoteColor,
-                            noteText = noteInputText,
-                            selectedText = customHighlightText
-                        )
-                        showAddNoteDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = currentButtonContainerColor, contentColor = currentButtonContentColor)
-                ) {
-                    Text("Lưu", color = currentButtonContentColor, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showAddNoteDialog = false },
-                    colors = ButtonDefaults.textButtonColors(contentColor = currentIconTint)
-                ) {
-                    Text("Hủy", color = currentIconTint, fontWeight = FontWeight.Bold)
-                }
-            }
-        )
     }
 
     if (showColorPickerSheet) {
@@ -466,6 +376,27 @@ fun ReaderScreen(
                         .padding(8.dp)
                 )
 
+                OutlinedTextField(
+                    value = noteInputText,
+                    onValueChange = { noteInputText = it },
+                    label = { Text("Ghi chú") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = currentTextColor,
+                        unfocusedTextColor = currentTextColor
+                    )
+                )
+                OutlinedTextField(
+                    value = noteTagInputText,
+                    onValueChange = { noteTagInputText = it },
+                    label = { Text("Tag") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = currentTextColor,
+                        unfocusedTextColor = currentTextColor
+                    )
+                )
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -482,8 +413,11 @@ fun ReaderScreen(
                                     startOffset = activeParagraphIndex,
                                     endOffset = activeSelectedStartChar,
                                     colorHex = "#FFF176",
+                                    noteText = noteTextWithTag(noteInputText, noteTagInputText),
                                     selectedText = activeSelectedText
                                 )
+                                noteInputText = ""
+                                noteTagInputText = ""
                                 showColorPickerSheet = false
                             }
                     )
@@ -499,8 +433,11 @@ fun ReaderScreen(
                                     startOffset = activeParagraphIndex,
                                     endOffset = activeSelectedStartChar,
                                     colorHex = "#A5D6A7",
+                                    noteText = noteTextWithTag(noteInputText, noteTagInputText),
                                     selectedText = activeSelectedText
                                 )
+                                noteInputText = ""
+                                noteTagInputText = ""
                                 showColorPickerSheet = false
                             }
                     )
@@ -516,8 +453,11 @@ fun ReaderScreen(
                                     startOffset = activeParagraphIndex,
                                     endOffset = activeSelectedStartChar,
                                     colorHex = "#F48FB1",
+                                    noteText = noteTextWithTag(noteInputText, noteTagInputText),
                                     selectedText = activeSelectedText
                                 )
+                                noteInputText = ""
+                                noteTagInputText = ""
                                 showColorPickerSheet = false
                             }
                     )
@@ -533,8 +473,11 @@ fun ReaderScreen(
                                     startOffset = activeParagraphIndex,
                                     endOffset = activeSelectedStartChar,
                                     colorHex = "#90CAF9",
+                                    noteText = noteTextWithTag(noteInputText, noteTagInputText),
                                     selectedText = activeSelectedText
                                 )
+                                noteInputText = ""
+                                noteTagInputText = ""
                                 showColorPickerSheet = false
                             }
                     )
@@ -544,27 +487,10 @@ fun ReaderScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Button(
-                        onClick = {
-                            noteInputText = ""
-                            customHighlightText = activeSelectedText
-                            selectedParagraphIndex = activeParagraphIndex
-                            // Keep activeSelectedStartChar and activeNoteColor preserved
-                            showAddNoteDialog = true
-                            showColorPickerSheet = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = currentButtonContainerColor, contentColor = currentButtonContentColor),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = currentButtonContentColor)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Ghi chú", fontSize = 12.sp, color = currentButtonContentColor)
-                    }
-
                     OutlinedButton(
                         onClick = { showColorPickerSheet = false },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = currentTextColor),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Hủy", fontSize = 12.sp)
                     }
@@ -1657,24 +1583,47 @@ fun ReaderScreen(
                                                     }
                                                 }
 
-                                                Text(
-                                                    text = annotatedText,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(4.dp))
-                                                        .combinedClickable(
-                                                            onClick = { showControlMenu = !showControlMenu },
-                                                            onLongClick = {
+                                                var textFieldValue by remember(annotatedText) {
+                                                    mutableStateOf(TextFieldValue(annotatedText))
+                                                }
+
+                                                LaunchedEffect(showColorPickerSheet) {
+                                                    if (!showColorPickerSheet && !textFieldValue.selection.collapsed) {
+                                                        textFieldValue = textFieldValue.copy(selection = TextRange.Zero)
+                                                    }
+                                                }
+
+                                                BasicTextField(
+                                                    value = textFieldValue,
+                                                    onValueChange = { newValue ->
+                                                        textFieldValue = newValue.copy(annotatedString = annotatedText)
+                                                        val selection = newValue.selection
+                                                        val selectionStart = minOf(selection.start, selection.end).coerceIn(0, paragraph.length)
+                                                        val selectionEnd = maxOf(selection.start, selection.end).coerceIn(0, paragraph.length)
+                                                        if (selectionEnd > selectionStart) {
+                                                            val rawSelected = paragraph.substring(selectionStart, selectionEnd)
+                                                            val leadingTrimmed = rawSelected.length - rawSelected.trimStart().length
+                                                            val selected = rawSelected.trim()
+                                                            if (selected.isNotEmpty()) {
                                                                 selectedParagraphIndex = absoluteIndex
                                                                 selectedParagraphText = paragraph
                                                                 activeParagraphIndex = absoluteIndex
-                                                                activeSelectedText = paragraph
-                                                                activeSelectedStartChar = 0
-                                                                showParagraphActions = true
+                                                                activeSelectedText = selected
+                                                                activeSelectedStartChar = selectionStart + leadingTrimmed
+                                                                customHighlightText = selected
+                                                                noteInputText = ""
+                                                                noteTagInputText = ""
+                                                                showControlMenu = false
+                                                                showColorPickerSheet = true
                                                             }
-                                                        )
+                                                        }
+                                                    },
+                                                    readOnly = true,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(4.dp))
                                                         .padding(vertical = 1.dp, horizontal = 8.dp),
-                                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
                                                         fontSize = settings.fontSizeSp.sp,
                                                         lineHeight = readerLineHeightSp,
                                                         fontFamily = currentFontFamily,
@@ -1873,6 +1822,17 @@ fun pageIndexForOffset(pages: List<List<PageParagraph>>, offset: Int): Int {
         first != null && first.absoluteIndex <= offset
     }
     return if (index >= 0) index else 0
+}
+
+fun noteTextWithTag(noteText: String, tagText: String): String {
+    val tags = tagText
+        .split(',', ' ')
+        .map { it.trim().trimStart('#') }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .joinToString(" ") { "#$it" }
+    val note = noteText.trim()
+    return listOf(tags, note).filter { it.isNotEmpty() }.joinToString(" ")
 }
 
 @Composable

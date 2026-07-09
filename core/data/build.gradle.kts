@@ -29,6 +29,7 @@ dependencies {
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.okhttp.core)
 
     // WorkManager + Hilt integration
     implementation(libs.work.runtime.ktx)
