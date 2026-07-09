@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -34,7 +35,7 @@ import android.content.Context
 
 sealed interface ReaderUiState {
     data object Loading : ReaderUiState
-    data class Success(val chapter: Chapter, val bookId: String, val bookTitle: String, val bookAuthor: String) : ReaderUiState
+    data class Success(val chapter: Chapter, val bookId: String, val bookTitle: String, val bookAuthor: String, val savedPage: Int) : ReaderUiState
     data class Error(val message: String) : ReaderUiState
 }
 
@@ -56,12 +57,29 @@ class ReaderViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val bookId: String = checkNotNull(savedStateHandle["bookId"])
+
+    private val initialChapter: Int
+        get() {
+            val fromSavedState: Int? = savedStateHandle["chapter"]
+            if (fromSavedState != null && fromSavedState > 0) return fromSavedState
+            val sharedPrefs = context.getSharedPreferences("reader_progress", Context.MODE_PRIVATE)
+            return sharedPrefs.getInt("last_chapter_$bookId", 1).coerceAtLeast(1)
+        }
+
     val initialParagraph: Int
         get() {
             val fromSavedState: Int? = savedStateHandle["paragraph"]
             if (fromSavedState != null && fromSavedState != -1) return fromSavedState
             val sharedPrefs = context.getSharedPreferences("reader_progress", Context.MODE_PRIVATE)
             return sharedPrefs.getInt("last_paragraph_$bookId", 0)
+        }
+
+    val hasSavedParagraphPosition: Boolean
+        get() {
+            val fromSavedState: Int? = savedStateHandle["paragraph"]
+            if (fromSavedState != null && fromSavedState != -1) return true
+            val sharedPrefs = context.getSharedPreferences("reader_progress", Context.MODE_PRIVATE)
+            return sharedPrefs.contains("last_paragraph_$bookId")
         }
     private val _uiState = MutableStateFlow<ReaderUiState>(ReaderUiState.Loading)
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
@@ -73,8 +91,16 @@ class ReaderViewModel @Inject constructor(
             initialValue = UserSettings(16, "serif", "light")
         )
 
+    val bookHighlights: StateFlow<List<Highlight>> = bookRepository.getAllHighlights()
+        .map { highlights -> highlights.filter { it.bookId == bookId } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     init {
-        loadChapter(1)
+        loadChapter(initialChapter)
     }
 
     fun loadChapter(chapterNumber: Int) {
@@ -97,7 +123,7 @@ class ReaderViewModel @Inject constructor(
                     "4" -> "Herman Melville"
                     else -> "Leo Tolstoy"
                 }
-                _uiState.value = ReaderUiState.Success(chapter, bookId, bookTitle, bookAuthor)
+                _uiState.value = ReaderUiState.Success(chapter, bookId, bookTitle, bookAuthor, book?.currentPage ?: 0)
             } catch (e: Exception) {
                 _uiState.value = ReaderUiState.Error(e.message ?: "Failed to load chapter")
             }
@@ -105,9 +131,11 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun updateProgress(page: Int, totalPages: Int) {
+        if (totalPages <= 0) return
         viewModelScope.launch {
-            val progressPercent = page.toFloat() / totalPages
-            updateProgressUseCase(bookId, page, progressPercent)
+            val safePage = page.coerceIn(1, totalPages)
+            val progressPercent = (safePage.toFloat() / totalPages.toFloat()).coerceIn(0f, 1f)
+            updateProgressUseCase(bookId, safePage, progressPercent)
         }
     }
 

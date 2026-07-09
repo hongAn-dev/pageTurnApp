@@ -213,6 +213,10 @@ fun LibraryScreen(
     val userProfile by viewModel.userProfile.collectAsState()
     val discoverUiState by viewModel.discoverUiState.collectAsState()
 
+    LaunchedEffect(Unit) {
+        viewModel.loadStoreBooks()
+    }
+
     if (isImporting) {
         AlertDialog(
             onDismissRequest = {},
@@ -251,7 +255,7 @@ fun LibraryScreen(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "PageTurn",
+                                text = "Libra",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     fontStyle = FontStyle.Italic,
@@ -978,15 +982,6 @@ fun BookItem(
                                 onDownloadClick()
                             }
                         )
-                        DropdownMenuItem(
-                            text = {
-                                Text("Xóa sách khỏi server", color = MaterialTheme.colorScheme.error)
-                            },
-                            onClick = {
-                                showMenu = false
-                                onDeleteCloudClick()
-                            }
-                        )
                     }
                     DropdownMenuItem(
                         text = {
@@ -1024,6 +1019,7 @@ fun DiscoverScreenContent(viewModel: LibraryViewModel, onBookClick: (String) -> 
     val discoverState by viewModel.discoverUiState.collectAsState()
     val downloadingIds by viewModel.downloadingBookIds.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val serverCategories by viewModel.storeCategories.collectAsState()
 
     LaunchedEffect(selectedCategory, storeSearchQuery) {
         viewModel.loadStoreBooks(
@@ -1089,7 +1085,7 @@ fun DiscoverScreenContent(viewModel: LibraryViewModel, onBookClick: (String) -> 
 
         // --- CATEGORY CHIPS ROW ---
         item {
-            val categories = listOf("Tất cả", "Trinh thám", "Cổ điển", "Lãng mạn", "Kinh tế", "Lịch sử")
+            val categories = listOf("Tất cả") + serverCategories
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -1692,7 +1688,7 @@ fun SettingsScreenContent(viewModel: LibraryViewModel, onSignOut: () -> Unit) {
                             viewModel.exportHighlightsAsTxt { textContent ->
                                 val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "PageTurn TXT Export")
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Libra TXT Export")
                                     putExtra(android.content.Intent.EXTRA_TEXT, textContent)
                                 }
                                 context.startActivity(android.content.Intent.createChooser(intent, "Xuất ghi chú sang Text"))
@@ -1709,7 +1705,7 @@ fun SettingsScreenContent(viewModel: LibraryViewModel, onSignOut: () -> Unit) {
                             viewModel.exportHighlightsAsJson { jsonContent ->
                                 val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "PageTurn JSON Export")
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Libra JSON Export")
                                     putExtra(android.content.Intent.EXTRA_TEXT, jsonContent)
                                 }
                                 context.startActivity(android.content.Intent.createChooser(intent, "Xuất ghi chú sang JSON"))
@@ -1880,7 +1876,7 @@ fun SettingsScreenContent(viewModel: LibraryViewModel, onSignOut: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = viewModel.userEmail.ifBlank { userProfile.email.ifBlank { "anvo@gmail.com" } },
+            text = viewModel.userEmail.collectAsState().value.ifBlank { userProfile.email.ifBlank { "anvo@gmail.com" } },
             style = MaterialTheme.typography.bodyMedium.copy(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -2085,7 +2081,7 @@ fun readTextFromUri(context: android.content.Context, uri: Uri): String {
 fun generateLongPdfMockContent(title: String): String {
     val builder = StringBuilder()
     builder.append("TÀI LIỆU HỌC TẬP & NGHIÊN CỨU: $title\n\n")
-    builder.append("Tài liệu này đã được trích xuất kỹ thuật số và chuẩn hóa định dạng hiển thị bởi bộ giải mã nâng cao của PageTurn. Dưới đây là nội dung chi tiết của tài liệu bao gồm các biểu đồ và hình vẽ minh họa.\n\n")
+    builder.append("Tài liệu này đã được trích xuất kỹ thuật số và chuẩn hóa định dạng hiển thị bởi bộ giải mã nâng cao của Libra. Dưới đây là nội dung chi tiết của tài liệu bao gồm các biểu đồ và hình vẽ minh họa.\n\n")
     builder.append("[image: diagram_overview]\n\n")
     builder.append("SƠ ĐỒ TỔNG QUAN TÀI LIỆU\n\n")
     
@@ -2500,7 +2496,7 @@ fun parseEpubText(context: android.content.Context, uri: Uri): String {
     val textBuilder = StringBuilder()
     var tempFile: java.io.File? = null
     try {
-        tempFile = java.io.File.createTempFile("pageturn_import_", ".epub", context.cacheDir)
+        tempFile = java.io.File.createTempFile("libra_import_", ".epub", context.cacheDir)
         context.contentResolver.openInputStream(uri)?.use { input ->
             tempFile.outputStream().use { output ->
                 input.copyTo(output)
@@ -3024,7 +3020,7 @@ fun HomeScreenContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Sách trên server",
+                    text = "Kho sách online",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 )
                 TextButton(onClick = onNavigateToDiscover) {

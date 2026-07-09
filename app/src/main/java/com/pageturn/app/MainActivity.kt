@@ -44,7 +44,8 @@ class MainActivity : ComponentActivity() {
             PageTurnTheme(theme = settingsState.value.readingTheme) {
                 val navController = rememberNavController()
                 val viewModel: com.pageturn.feature.library.LibraryViewModel = androidx.hilt.navigation.compose.hiltViewModel()
-                val startDest = if (viewModel.isUserSignedIn) "library" else "auth"
+                val isUserSignedIn = viewModel.isUserSignedIn.collectAsState().value
+                val startDest = if (isUserSignedIn) "library" else "auth"
                 
                 NavHost(
                     navController = navController,

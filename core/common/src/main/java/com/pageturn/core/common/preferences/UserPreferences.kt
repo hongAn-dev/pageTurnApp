@@ -74,7 +74,7 @@ class UserPreferencesDataSource @Inject constructor(
 
     val userProfile: Flow<UserProfile> = context.dataStore.data.map { preferences ->
         UserProfile(
-            name = preferences[userNameKey] ?: "Người dùng PageTurn",
+            name = preferences[userNameKey] ?: "Người dùng Libra",
             email = preferences[userEmailKey] ?: "user@pageturn.com",
             bio = preferences[userBioKey] ?: "Người yêu sách & độc giả trung thành"
         )

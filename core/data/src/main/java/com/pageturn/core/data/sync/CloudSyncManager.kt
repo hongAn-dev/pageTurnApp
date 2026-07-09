@@ -1,5 +1,6 @@
 package com.pageturn.core.data.sync
 
+import android.content.Context
 import android.util.Log
 import com.pageturn.core.common.preferences.UserPreferencesDataSource
 import com.pageturn.core.domain.repository.BookRepository
@@ -10,6 +11,7 @@ import com.pageturn.core.network.api.SyncPushRequest
 import kotlinx.coroutines.flow.firstOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 sealed class SyncResult {
     data class Success(val books: Int, val highlights: Int) : SyncResult()
@@ -20,7 +22,8 @@ sealed class SyncResult {
 class CloudSyncManager @Inject constructor(
     private val bookRepository: BookRepository,
     private val syncService: BackendSyncService,
-    private val userPreferencesDataSource: UserPreferencesDataSource
+    private val userPreferencesDataSource: UserPreferencesDataSource,
+    @ApplicationContext private val context: Context
 ) {
     private val tag = "CloudSyncManager"
 
@@ -45,11 +48,12 @@ class CloudSyncManager @Inject constructor(
 
         return try {
             val books = bookRepository.getAllBooksSnapshot()
+            val readerPrefs = context.getSharedPreferences("reader_progress", Context.MODE_PRIVATE)
             val progress = books.map { book ->
                 ProgressDto(
                     bookHash = book.id,
-                    chapterIdx = book.currentPage,
-                    scrollPct = book.progressPercent
+                    chapterIdx = readerPrefs.getInt("last_chapter_${book.id}", 1),
+                    scrollPct = book.progressPercent.coerceIn(0f, 1f)
                 )
             }
 

@@ -146,8 +146,8 @@ object NotificationHelper {
 
         val messages = listOf(
             "📖 Hôm nay bạn đã đọc sách chưa? Tiếp tục nhé!",
-            "✨ Mỗi trang sách là một hành trình mới. Mở PageTurn nào!",
-            "🌟 Bạn đang đọc gì hôm nay? PageTurn đang chờ bạn!",
+            "✨ Mỗi trang sách là một hành trình mới. Mở Libra nào!",
+            "🌟 Bạn đang đọc gì hôm nay? Libra đang chờ bạn!",
             "📚 Thói quen đọc sách mỗi ngày giúp bạn phát triển không ngừng.",
             "🎯 Chỉ cần 20 phút đọc sách mỗi ngày — hãy bắt đầu ngay!"
         )
@@ -155,7 +155,7 @@ object NotificationHelper {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
-            .setContentTitle("PageTurn — Nhắc nhở đọc sách")
+            .setContentTitle("Libra — Nhắc nhở đọc sách")
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)

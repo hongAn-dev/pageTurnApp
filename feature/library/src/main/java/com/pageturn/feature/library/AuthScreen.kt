@@ -125,7 +125,7 @@ fun AuthScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "PageTurn",
+                    text = "Libra",
                     style = MaterialTheme.typography.displayMedium.copy(
                         fontWeight = FontWeight.ExtraBold,
                         fontStyle = FontStyle.Normal,
@@ -302,7 +302,7 @@ fun AuthScreen(
                                         return@clickable
                                     }
                                     if (isSignUpMode) {
-                                        viewModel.signUpWithEmail(email, password, name.ifBlank { "Độc giả PageTurn" })
+                                        viewModel.signUpWithEmail(email, password, name.ifBlank { "Độc giả Libra" })
                                     } else {
                                         viewModel.signInWithEmail(email, password)
                                     }

@@ -8,10 +8,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -54,9 +55,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import android.graphics.Bitmap
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.text.input.TextFieldValue
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
@@ -67,7 +65,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -98,9 +95,9 @@ fun ReaderScreen(
     val uiState by viewModel.uiState.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val isTtsPlaying by viewModel.isTtsPlaying.collectAsState()
-    val scrollState = rememberScrollState()
-
     var showControlMenu by remember { mutableStateOf(false) }
+    var showHighlightsList by remember { mutableStateOf(false) }
+    var pendingHighlightJump by remember { mutableStateOf<Highlight?>(null) }
     // Paragraph selection / actions states
     var selectedParagraphIndex by remember { mutableStateOf(-1) }
     var selectedParagraphText by remember { mutableStateOf("") }
@@ -681,7 +678,7 @@ fun ReaderScreen(
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "— ${(uiState as? ReaderUiState.Success)?.bookTitle ?: "PageTurn"}",
+                                text = "— ${(uiState as? ReaderUiState.Success)?.bookTitle ?: "Libra"}",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp,
@@ -701,7 +698,7 @@ fun ReaderScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val shareMsg = "\"$selectedParagraphText\"\n— Trích từ sách \"${(uiState as? ReaderUiState.Success)?.bookTitle ?: "PageTurn"}\""
+                        val shareMsg = "\"$selectedParagraphText\"\n— Trích từ sách \"${(uiState as? ReaderUiState.Success)?.bookTitle ?: "Libra"}\""
                         val sendIntent = Intent().apply {
                             action = Intent.ACTION_SEND
                             putExtra(Intent.EXTRA_TEXT, shareMsg)
@@ -776,6 +773,7 @@ fun ReaderScreen(
             is ReaderUiState.Success -> {
                 val isBookmarked by viewModel.isBookmarked(chapterNumber = state.chapter.chapterNumber, pageNumber = 42).collectAsState(initial = false)
                 val highlights by viewModel.getHighlights(state.chapter.chapterNumber).collectAsState(initial = emptyList())
+                val bookHighlights by viewModel.bookHighlights.collectAsState()
 
                 // Dynamic Pagination: PDF = 1 image per page, text = character budget pagination
                 val isDirectPdf = state.chapter.content.startsWith("[pdf_file: ") && state.chapter.content.endsWith("]")
@@ -809,20 +807,20 @@ fun ReaderScreen(
                 val screenWidthDp = configuration.screenWidthDp
                 val screenHeightDp = configuration.screenHeightDp
                 val density = androidx.compose.ui.platform.LocalDensity.current
-                val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-
+                val readerLineHeightSp = (settings.fontSizeSp * 1.45f).sp
                 val textStyle = MaterialTheme.typography.bodyLarge.copy(
                     fontSize = settings.fontSizeSp.sp,
+                    lineHeight = readerLineHeightSp,
                     fontFamily = currentFontFamily
                 )
 
-                val availableWidthDp = screenWidthDp.dp - 32.dp
-                val availableHeightDp = (screenHeightDp.dp - 
-                    innerPadding.calculateTopPadding() - 
-                    innerPadding.calculateBottomPadding() - 
-                    44.dp - 
-                    48.dp - 
-                    88.dp).coerceAtLeast(200.dp)
+                val availableWidthDp = screenWidthDp.dp - 48.dp
+                val controlsHeightDp = 42.dp
+                val availableHeightDp = (screenHeightDp.dp -
+                    innerPadding.calculateTopPadding() -
+                    innerPadding.calculateBottomPadding() -
+                    44.dp -
+                    controlsHeightDp).coerceAtLeast(280.dp)
 
                 var paginatedTextPages by remember { mutableStateOf<List<List<PageParagraph>>>(emptyList()) }
                 var isPaginating by remember { mutableStateOf(false) }
@@ -832,62 +830,20 @@ fun ReaderScreen(
                     hasScrolledToTarget = false
                 }
 
-                LaunchedEffect(state.chapter.content, textStyle, availableWidthDp, availableHeightDp) {
+                LaunchedEffect(state.chapter.content, settings.fontSizeSp, availableWidthDp, availableHeightDp, density.fontScale) {
                     if (isPdfContent || isDirectPdf) {
                         paginatedTextPages = emptyList()
                     } else {
                         isPaginating = true
-                        paginatedTextPages = emptyList()
                         val content = state.chapter.content
-                        val availHPx = availableHeightDp.value * density.density
-                        val availWPx = availableWidthDp.value * density.density
-                        val fontSizePx = textStyle.fontSize.value * density.density * density.fontScale
-                        val maxLinesApprox = (availHPx / (fontSizePx * 1.45f)).toInt().coerceAtLeast(5)
-                        val charsPerLineApprox = (availWPx / (fontSizePx * 0.55f)).toInt().coerceAtLeast(10)
-                        val safeBudget = (maxLinesApprox * charsPerLineApprox * 0.85f).toInt().coerceAtLeast(20)
-
-                        // Estimate total pages for progress indication
-                        val cleanLen = content.length
-                        val estimatedPages = (cleanLen / safeBudget.toFloat()).toInt().coerceAtLeast(1)
-
-                        val FIRST_BATCH = 10
-                        val BATCH_SIZE = 30
-
-                        // Paginate first batch on Default dispatcher
-                        val firstBatch = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                            paginateTextRange(
+                        paginatedTextPages = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            fastPaginateText(
                                 content = content,
-                                textStyle = textStyle,
                                 screenWidthDp = availableWidthDp,
                                 screenHeightDp = availableHeightDp,
-                                textMeasurer = textMeasurer,
-                                density = density,
-                                maxPages = FIRST_BATCH
+                                fontSizeSp = settings.fontSizeSp,
+                                fontScale = density.fontScale
                             )
-                        }
-                        paginatedTextPages = firstBatch.first
-                        var resumeIdx = firstBatch.second
-
-                        if (resumeIdx < cleanLen) {
-                            // Continue paginating rest in background batches
-                            while (resumeIdx < cleanLen && kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.isActive != false) {
-                                val batch = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                    paginateTextRange(
-                                        content = content,
-                                        textStyle = textStyle,
-                                        screenWidthDp = availableWidthDp,
-                                        screenHeightDp = availableHeightDp,
-                                        textMeasurer = textMeasurer,
-                                        density = density,
-                                        maxPages = BATCH_SIZE,
-                                        startCharIdx = resumeIdx
-                                    )
-                                }
-                                paginatedTextPages = paginatedTextPages + batch.first
-                                resumeIdx = batch.second
-                                // Yield to let UI render
-                                kotlinx.coroutines.yield()
-                            }
                         }
                         isPaginating = false
                     }
@@ -898,8 +854,11 @@ fun ReaderScreen(
                                  else paginatedTextPages.size
 
                 val initialParagraph = viewModel.initialParagraph
-                val targetPage = remember(paginatedTextPages, initialParagraph) {
-                    if (isPdfContent || isDirectPdf) {
+                val hasSavedParagraphPosition = viewModel.hasSavedParagraphPosition
+                val targetPage = remember(paginatedTextPages, initialParagraph, hasSavedParagraphPosition, state.savedPage) {
+                    if (!hasSavedParagraphPosition) {
+                        (state.savedPage - 1).coerceAtLeast(0)
+                    } else if (isPdfContent || isDirectPdf) {
                         initialParagraph
                     } else {
                         val targetOffset = if (initialParagraph < 150) {
@@ -931,6 +890,16 @@ fun ReaderScreen(
                     if (!isPaginating && totalPages > 0 && !hasScrolledToTarget) {
                         pagerState.scrollToPage(targetPage.coerceIn(0, totalPages - 1))
                         hasScrolledToTarget = true
+                    }
+                }
+
+                LaunchedEffect(pendingHighlightJump, paginatedTextPages, isPaginating, state.chapter.chapterNumber) {
+                    val pending = pendingHighlightJump
+                    if (pending != null && !isPaginating && totalPages > 0 && pending.chapterNumber == state.chapter.chapterNumber) {
+                        val target = pageIndexForOffset(paginatedTextPages, pending.startOffset)
+                            .coerceIn(0, totalPages - 1)
+                        pagerState.scrollToPage(target)
+                        pendingHighlightJump = null
                     }
                 }
 
@@ -1071,6 +1040,18 @@ fun ReaderScreen(
                                             Text("Hủy", color = currentIconTint)
                                         }
                                     }
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showHighlightsList = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FormatColorText,
+                                    contentDescription = "Highlights",
+                                    tint = currentIconTint,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
 
@@ -1311,6 +1292,101 @@ fun ReaderScreen(
                             CircularProgressIndicator(color = currentIconTint)
                         }
                     } else {
+                        if (showHighlightsList) {
+                            ModalBottomSheet(
+                                onDismissRequest = { showHighlightsList = false },
+                                containerColor = currentSurfaceColor
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .navigationBarsPadding()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        text = "Highlights trong sách",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = currentTitleColor
+                                    )
+                                    if (bookHighlights.isEmpty()) {
+                                        Text(
+                                            text = "Chưa có highlight nào trong quyển sách này.",
+                                            color = currentTextSecondaryColor,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    } else {
+                                        LazyColumn(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 420.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            items(bookHighlights, key = { it.id }) { highlight ->
+                                                val preview = highlight.selectedText?.takeIf { it.isNotBlank() } ?: highlight.noteText ?: "Highlight"
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .clickable {
+                                                            pendingHighlightJump = highlight
+                                                            if (highlight.chapterNumber != state.chapter.chapterNumber) {
+                                                                viewModel.loadChapter(highlight.chapterNumber)
+                                                            } else {
+                                                                val target = pageIndexForOffset(paginatedTextPages, highlight.startOffset)
+                                                                    .coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+                                                                scope.launch { pagerState.scrollToPage(target) }
+                                                                pendingHighlightJump = null
+                                                            }
+                                                            showHighlightsList = false
+                                                        },
+                                                    color = currentTextColor.copy(alpha = 0.05f)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(12.dp),
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                        verticalAlignment = Alignment.Top
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(14.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(android.graphics.Color.parseColor(highlight.colorHex)))
+                                                        )
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = "Chương ${highlight.chapterNumber}",
+                                                                color = currentTextSecondaryColor,
+                                                                style = MaterialTheme.typography.labelSmall
+                                                            )
+                                                            Text(
+                                                                text = preview,
+                                                                maxLines = 3,
+                                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                                                color = currentTextColor,
+                                                                style = MaterialTheme.typography.bodyMedium
+                                                            )
+                                                            if (!highlight.noteText.isNullOrBlank()) {
+                                                                Spacer(modifier = Modifier.height(4.dp))
+                                                                Text(
+                                                                    text = highlight.noteText ?: "",
+                                                                    maxLines = 2,
+                                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                                                    color = currentTextSecondaryColor,
+                                                                    style = MaterialTheme.typography.bodySmall
+                                                                )
+                                                            }
+                                                        }
+                                                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = currentIconTint)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         HorizontalPager(
                             state = pagerState,
                         modifier = Modifier
@@ -1350,7 +1426,7 @@ fun ReaderScreen(
                         val paddingModifier = if (isPdfContent || isDirectPdf) {
                             Modifier.padding(0.dp)
                         } else {
-                            Modifier.padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 48.dp)
+                            Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp)
                         }
                         Column(
                             modifier = Modifier
@@ -1489,10 +1565,13 @@ fun ReaderScreen(
                                     }
                                 }
                             } else {
-                                SelectionContainer {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        val pageParagraphs = paginatedTextPages.getOrNull(page) ?: emptyList()
-                                        pageParagraphs.forEach { pageParagraph ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clipToBounds()
+                                ) {
+                                    val pageParagraphs = paginatedTextPages.getOrNull(page) ?: emptyList()
+                                    pageParagraphs.forEach { pageParagraph ->
                                             val absoluteIndex = pageParagraph.absoluteIndex
                                             val paragraph = pageParagraph.text
                                             val pHighlight = highlights.find { it.startOffset == absoluteIndex }
@@ -1578,52 +1657,33 @@ fun ReaderScreen(
                                                     }
                                                 }
 
-                                                var textFieldValue by remember(annotatedText) {
-                                                    mutableStateOf(TextFieldValue(annotatedText))
-                                                }
-
-                                                LaunchedEffect(showColorPickerSheet) {
-                                                    if (!showColorPickerSheet && textFieldValue.selection.length > 0) {
-                                                        textFieldValue = textFieldValue.copy(selection = androidx.compose.ui.text.TextRange.Zero)
-                                                    }
-                                                }
-
-                                                Column(
+                                                Text(
+                                                    text = annotatedText,
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .clip(RoundedCornerShape(4.dp))
-                                                        .padding(vertical = 1.dp, horizontal = 8.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        verticalAlignment = Alignment.Top
-                                                    ) {
-                                                        BasicTextField(
-                                                            value = textFieldValue,
-                                                            onValueChange = { newValue ->
-                                                                textFieldValue = newValue
-                                                                val sel = newValue.selection
-                                                                if (sel.length > 0) {
-                                                                    activeSelectedText = newValue.annotatedString.text.substring(sel.start, sel.end)
-                                                                    activeParagraphIndex = absoluteIndex
-                                                                    activeSelectedStartChar = minOf(sel.start, sel.end)
-                                                                    showColorPickerSheet = true
-                                                                }
-                                                            },
-                                                            readOnly = true,
-                                                            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                                                fontSize = settings.fontSizeSp.sp,
-                                                                fontFamily = currentFontFamily,
-                                                                color = currentTextColor
-                                                            ),
+                                                        .combinedClickable(
+                                                            onClick = { showControlMenu = !showControlMenu },
+                                                            onLongClick = {
+                                                                selectedParagraphIndex = absoluteIndex
+                                                                selectedParagraphText = paragraph
+                                                                activeParagraphIndex = absoluteIndex
+                                                                activeSelectedText = paragraph
+                                                                activeSelectedStartChar = 0
+                                                                showParagraphActions = true
+                                                            }
                                                         )
-                                                    }
-                                                }
+                                                        .padding(vertical = 1.dp, horizontal = 8.dp),
+                                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                                        fontSize = settings.fontSizeSp.sp,
+                                                        lineHeight = readerLineHeightSp,
+                                                        fontFamily = currentFontFamily,
+                                                        color = currentTextColor
+                                                    )
+                                                )
                                             }
                                             Spacer(modifier = Modifier.height(6.dp))
                                         }
-                                    }
                                 }
                             }
 
@@ -1659,6 +1719,160 @@ fun ReaderScreen(
             }
         }
     }
+}
+
+fun fastPaginateText(
+    content: String,
+    screenWidthDp: androidx.compose.ui.unit.Dp,
+    screenHeightDp: androidx.compose.ui.unit.Dp,
+    fontSizeSp: Int,
+    fontScale: Float
+): List<List<PageParagraph>> {
+    val cleanContent = normalizeReaderContent(content)
+    if (cleanContent.isBlank()) return emptyList()
+
+    val lineHeightSp = fontSizeSp * 1.45f
+    val maxLinesPerPage = (screenHeightDp.value / lineHeightSp).toInt()
+        .coerceAtLeast(6)
+    val charsPerLine = (screenWidthDp.value / (fontSizeSp * fontScale * 0.56f)).toInt()
+        .coerceAtLeast(14)
+    val safeLinesPerPage = maxLinesPerPage.coerceAtLeast(6)
+
+    val pages = mutableListOf<List<PageParagraph>>()
+    val currentPage = StringBuilder()
+    var currentPageStart = 0
+    var currentLineCount = 0
+    var cursor = 0
+
+    fun appendPage() {
+        val pageText = currentPage.toString().trim()
+        if (pageText.isNotEmpty()) {
+            pages += listOf(PageParagraph(currentPageStart, pageText))
+        }
+        currentPage.clear()
+        currentLineCount = 0
+    }
+
+    cleanContent.splitToSequence("\n\n").forEach { rawParagraph ->
+        val paragraphStart = cursor
+        val paragraph = rawParagraph.trim()
+        cursor += rawParagraph.length + 2
+        if (paragraph.isEmpty()) return@forEach
+
+        var remaining = paragraph
+        var remainingOffset = paragraphStart + rawParagraph.indexOf(paragraph).coerceAtLeast(0)
+        while (remaining.isNotEmpty()) {
+            val nextChunk = takeLinesForPage(
+                text = remaining,
+                charsPerLine = charsPerLine,
+                maxLines = safeLinesPerPage - currentLineCount
+            )
+
+            if (nextChunk.isBlank()) {
+                appendPage()
+                continue
+            }
+
+            if (currentPage.isEmpty()) currentPageStart = remainingOffset
+            val addsParagraphGap = currentPage.isNotEmpty()
+            if (addsParagraphGap) currentPage.append("\n\n")
+            currentPage.append(nextChunk)
+            currentLineCount += estimatedWrappedLines(nextChunk, charsPerLine) + if (addsParagraphGap) 1 else 0
+
+            remainingOffset += nextChunk.length
+            remaining = remaining.drop(nextChunk.length).trimStart()
+            remainingOffset += paragraph.drop(nextChunk.length).takeWhile { it.isWhitespace() }.length
+
+            if (remaining.isNotEmpty()) {
+                appendPage()
+            } else if (currentLineCount >= safeLinesPerPage) {
+                appendPage()
+            }
+        }
+    }
+
+    appendPage()
+    return pages
+}
+
+fun takeLinesForPage(text: String, charsPerLine: Int, maxLines: Int): String {
+    if (maxLines <= 0) return ""
+    val words = text.split(Regex("\\s+"))
+    val builder = StringBuilder()
+    var lineCount = 1
+    var lineChars = 0
+
+    for (word in words) {
+        if (word.isEmpty()) continue
+        val wordLines = ((word.length - 1) / charsPerLine) + 1
+        val additionalLines = when {
+            lineChars == 0 -> wordLines - 1
+            lineChars + 1 + word.length <= charsPerLine -> 0
+            else -> wordLines
+        }
+        if (builder.isNotEmpty() && lineCount + additionalLines > maxLines) break
+
+        if (builder.isNotEmpty()) {
+            builder.append(' ')
+            if (lineChars + 1 + word.length <= charsPerLine) {
+                lineChars += 1 + word.length
+            } else {
+                lineCount += wordLines
+                lineChars = word.length % charsPerLine
+                if (lineChars == 0) lineChars = charsPerLine
+            }
+        } else {
+            lineCount += wordLines - 1
+            lineChars = word.length % charsPerLine
+            if (lineChars == 0) lineChars = charsPerLine
+        }
+        builder.append(word)
+    }
+    return builder.toString()
+}
+
+fun estimatedWrappedLines(text: String, charsPerLine: Int): Int {
+    if (text.isBlank()) return 0
+    var lines = 1
+    var lineChars = 0
+    text.split(Regex("\\s+")) .forEach { word ->
+        if (word.isEmpty()) return@forEach
+        val wordLines = ((word.length - 1) / charsPerLine) + 1
+        if (lineChars == 0) {
+            lines += wordLines - 1
+            lineChars = word.length % charsPerLine
+            if (lineChars == 0) lineChars = charsPerLine
+        } else if (lineChars + 1 + word.length <= charsPerLine) {
+            lineChars += 1 + word.length
+        } else {
+            lines += wordLines
+            lineChars = word.length % charsPerLine
+            if (lineChars == 0) lineChars = charsPerLine
+        }
+    }
+    return lines
+}
+
+fun normalizeReaderContent(content: String): String {
+    return if (content.firstOrNull()?.isDigit() == true && content.contains("\n")) {
+        val lines = content.split("\n")
+        if (lines.firstOrNull()?.trim()?.toIntOrNull() != null) {
+            lines.drop(1).joinToString("\n")
+        } else {
+            content
+        }
+    } else {
+        content
+    }
+}
+
+fun pageIndexForOffset(pages: List<List<PageParagraph>>, offset: Int): Int {
+    if (pages.isEmpty()) return 0
+    val index = pages.indexOfLast { page ->
+        val first = page.firstOrNull()
+        first != null && first.absoluteIndex <= offset
+    }
+    return if (index >= 0) index else 0
 }
 
 @Composable

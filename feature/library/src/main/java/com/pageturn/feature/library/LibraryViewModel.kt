@@ -25,7 +25,7 @@ import com.pageturn.core.network.api.LoginRequest
 import com.pageturn.core.network.api.RegisterRequest
 import com.pageturn.core.network.api.LogoutRequest
 import com.pageturn.core.network.api.BackendSyncService
-import kotlinx.coroutines.runBlocking
+import com.pageturn.core.network.api.PublicBookDto
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.text.SimpleDateFormat
 import java.util.*
@@ -50,25 +50,50 @@ class LibraryViewModel @Inject constructor(
 
     sealed interface DiscoverUiState {
         data object Loading : DiscoverUiState
-        data class Success(val popular: List<com.pageturn.core.network.api.PublicBookDto>, val recommended: List<com.pageturn.core.network.api.PublicBookDto>) : DiscoverUiState
+        data class Success(val popular: List<PublicBookDto>, val recommended: List<PublicBookDto>) : DiscoverUiState
         data class Error(val message: String) : DiscoverUiState
     }
 
     private val _discoverUiState = MutableStateFlow<DiscoverUiState>(DiscoverUiState.Success(emptyList(), emptyList()))
     val discoverUiState: StateFlow<DiscoverUiState> = _discoverUiState.asStateFlow()
 
+    private val _storeCategories = MutableStateFlow<List<String>>(emptyList())
+    val storeCategories: StateFlow<List<String>> = _storeCategories.asStateFlow()
+
+    private var sessionStoreBooksCache: List<PublicBookDto>? = null
+
     private val _downloadingBookIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadingBookIds: StateFlow<Set<String>> = _downloadingBookIds.asStateFlow()
 
-    fun loadStoreBooks(category: String? = null, query: String? = null) {
+    fun loadStoreBooks(category: String? = null, query: String? = null, forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _discoverUiState.value = DiscoverUiState.Loading
             try {
-                val apiCategory = if (category == "Tất cả" || category == "All") null else category
-                val response = syncService.listPublicBooks(page = 0, size = 20, category = apiCategory, query = query)
-                val bookList = response.data?.content ?: emptyList()
-                // Split popular and recommended simply for design layout
-                val half = bookList.size / 2
+                val allBooks = if (sessionStoreBooksCache == null || forceRefresh) {
+                    val response = syncService.listPublicBooks(page = 0, size = 200, category = null, query = null)
+                    (response.data?.content ?: emptyList()).also { books ->
+                        sessionStoreBooksCache = books
+                        _storeCategories.value = books.mapNotNull { it.category?.trim() }
+                            .filter { it.isNotEmpty() }
+                            .distinct()
+                            .sortedBy { it.lowercase(Locale.getDefault()) }
+                    }
+                } else {
+                    sessionStoreBooksCache.orEmpty()
+                }
+
+                val normalizedCategory = category?.takeUnless { it == "Tất cả" || it == "All" }?.trim()
+                val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
+                val bookList = allBooks.filter { book ->
+                    val matchesCategory = normalizedCategory == null || book.category.equals(normalizedCategory, ignoreCase = true)
+                    val matchesQuery = normalizedQuery == null ||
+                        book.title.contains(normalizedQuery, ignoreCase = true) ||
+                        book.author.contains(normalizedQuery, ignoreCase = true) ||
+                        (book.description?.contains(normalizedQuery, ignoreCase = true) == true)
+                    matchesCategory && matchesQuery
+                }
+
+                val half = (bookList.size + 1) / 2
                 val popular = bookList.take(half)
                 val recommended = bookList.drop(half)
                 _discoverUiState.value = DiscoverUiState.Success(popular, recommended)
@@ -200,15 +225,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun deleteCloudBook(bookId: String) {
-        viewModelScope.launch {
-            try {
-                bookRepository.deleteCloudBook(bookId)
-                // also delete locally
-                bookRepository.deleteLocalBook(bookId)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
+        deleteLocalBook(bookId)
     }
 
     // --- Authentication States ---
@@ -222,11 +239,21 @@ class LibraryViewModel @Inject constructor(
     private val _authUiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
     val authUiState: StateFlow<AuthUiState> = _authUiState.asStateFlow()
 
-    val isUserSignedIn: Boolean
-        get() = runBlocking { !userPreferencesDataSource.accessToken.firstOrNull().isNullOrEmpty() }
+    val isUserSignedIn: StateFlow<Boolean> = userPreferencesDataSource.accessToken
+        .map { !it.isNullOrEmpty() }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
 
-    val userEmail: String
-        get() = runBlocking { userPreferencesDataSource.userProfile.firstOrNull()?.email ?: "" }
+    val userEmail: StateFlow<String> = userPreferencesDataSource.userProfile
+        .map { it.email }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = ""
+        )
 
     val uiState: StateFlow<LibraryUiState> = getRecentReadsUseCase()
         .map<List<Book>, LibraryUiState> { books ->
@@ -242,7 +269,7 @@ class LibraryViewModel @Inject constructor(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = UserProfile("Người dùng PageTurn", "user@pageturn.com", "Người yêu sách & độc giả trung thành")
+            initialValue = UserProfile("Người dùng Libra", "user@pageturn.com", "Người yêu sách & độc giả trung thành")
         )
 
     val favoriteBookIds: StateFlow<Set<String>> = bookRepository.getBookmarkedBookIds()
@@ -480,7 +507,7 @@ class LibraryViewModel @Inject constructor(
                 val authData = response.data ?: throw Exception(response.message ?: "Đăng nhập thất bại")
                 userPreferencesDataSource.saveTokens(authData.accessToken, authData.refreshToken)
                 userPreferencesDataSource.updateUserProfile(
-                    name = authData.user?.displayName ?: "Độc giả PageTurn",
+                    name = authData.user?.displayName ?: "Độc giả Libra",
                     email = authData.user?.email ?: email,
                     bio = ""
                 )
@@ -594,7 +621,7 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             val list = bookRepository.getAllHighlightsSnapshot()
             val sb = StringBuilder()
-            sb.append("PageTurn Highlights & Notes Export\n")
+            sb.append("Libra Highlights & Notes Export\n")
             sb.append("==================================\n")
             val format = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
             sb.append("Xuất ngày: $format\n\n")

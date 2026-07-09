@@ -1,5 +1,6 @@
 package com.pageturn.core.data.repository
 
+import android.content.Context
 import com.pageturn.core.database.dao.BookDao
 import com.pageturn.core.database.dao.BookmarkDao
 import com.pageturn.core.database.dao.HighlightDao
@@ -7,12 +8,12 @@ import com.pageturn.core.database.model.BookEntity
 import com.pageturn.core.model.Book
 import com.pageturn.core.network.PageTurnNetworkApi
 import io.mockk.*
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class BookRepositoryImplTest {
 
@@ -20,6 +21,8 @@ class BookRepositoryImplTest {
     private val bookmarkDao: BookmarkDao = mockk(relaxed = true)
     private val highlightDao: HighlightDao = mockk(relaxed = true)
     private val networkApi: PageTurnNetworkApi = mockk(relaxed = true)
+    private val context: Context = mockk(relaxed = true)
+    private val filesDir = File(System.getProperty("java.io.tmpdir"), "pageturn-repository-test")
     private val testDispatcher = StandardTestDispatcher()
 
     private val repository = BookRepositoryImpl(
@@ -27,7 +30,8 @@ class BookRepositoryImplTest {
         bookmarkDao = bookmarkDao,
         highlightDao = highlightDao,
         networkApi = networkApi,
-        ioDispatcher = testDispatcher
+        ioDispatcher = testDispatcher,
+        context = context
     )
 
     @Test
@@ -57,6 +61,7 @@ class BookRepositoryImplTest {
     fun getChapter_forLocalBook_shouldReadFromDatabaseAndReturnLocalContent() = runTest(testDispatcher) {
         // Arrange
         val bookId = "local_12345"
+        every { context.filesDir } returns filesDir
         val localBookEntity = BookEntity(
             id = bookId,
             title = "Test Local Book",
@@ -67,7 +72,7 @@ class BookRepositoryImplTest {
             currentPage = 0,
             description = "Test Description"
         )
-        every { bookDao.getBook(bookId) } returns flowOf(localBookEntity)
+        coEvery { bookDao.getBookSnapshot(bookId) } returns localBookEntity
 
         // Act
         val chapter = repository.getChapter(bookId, 1)
