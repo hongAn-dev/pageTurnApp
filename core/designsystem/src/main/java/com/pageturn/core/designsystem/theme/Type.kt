@@ -17,28 +17,24 @@ val Typography = Typography(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.Medium,
         fontSize = 22.sp,
-        lineHeight = 28.sp,
-        color = PtTextNavy
+        lineHeight = 28.sp
     ),
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
-        lineHeight = 26.sp,
-        color = PtTextMain
+        lineHeight = 26.sp
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
-        lineHeight = 20.sp,
-        color = PtTextSecondary
+        lineHeight = 20.sp
     ),
     labelLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
-        lineHeight = 16.sp,
-        color = PtTextNavy
+        lineHeight = 16.sp
     )
 )

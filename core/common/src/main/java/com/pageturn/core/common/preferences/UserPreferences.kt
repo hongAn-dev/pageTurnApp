@@ -54,6 +54,7 @@ class UserPreferencesDataSource @Inject constructor(
     private val favoriteBookIdsKey = stringSetPreferencesKey("favorite_book_ids")
     private val accessTokenKey = stringPreferencesKey("access_token")
     private val refreshTokenKey = stringPreferencesKey("refresh_token")
+    private val userCollectionsKey = stringPreferencesKey("user_collections_data")
 
     val userSettings: Flow<UserSettings> = context.dataStore.data.map { preferences ->
         UserSettings(
@@ -81,6 +82,11 @@ class UserPreferencesDataSource @Inject constructor(
 
     val favoriteBookIds: Flow<Set<String>> = context.dataStore.data.map { preferences ->
         preferences[favoriteBookIdsKey] ?: emptySet()
+    }
+
+    val userCollections: Flow<Map<String, Set<String>>> = context.dataStore.data.map { preferences ->
+        val jsonStr = preferences[userCollectionsKey] ?: ""
+        parseCollectionsJson(jsonStr)
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { preferences ->
@@ -183,5 +189,83 @@ class UserPreferencesDataSource @Inject constructor(
                 preferences[favoriteBookIdsKey] = current + bookId
             }
         }
+    }
+
+    suspend fun createCollection(name: String) {
+        context.dataStore.edit { preferences ->
+            val jsonStr = preferences[userCollectionsKey] ?: ""
+            val map = parseCollectionsJson(jsonStr).toMutableMap()
+            if (!map.containsKey(name)) {
+                map[name] = emptySet()
+                preferences[userCollectionsKey] = serializeCollectionsMap(map)
+            }
+        }
+    }
+
+    suspend fun deleteCollection(name: String) {
+        context.dataStore.edit { preferences ->
+            val jsonStr = preferences[userCollectionsKey] ?: ""
+            val map = parseCollectionsJson(jsonStr).toMutableMap()
+            if (map.containsKey(name)) {
+                map.remove(name)
+                preferences[userCollectionsKey] = serializeCollectionsMap(map)
+            }
+        }
+    }
+
+    suspend fun toggleBookInCollection(collectionName: String, bookId: String) {
+        context.dataStore.edit { preferences ->
+            val jsonStr = preferences[userCollectionsKey] ?: ""
+            val map = parseCollectionsJson(jsonStr).toMutableMap()
+            val set = (map[collectionName] ?: emptySet()).toMutableSet()
+            if (set.contains(bookId)) {
+                set.remove(bookId)
+            } else {
+                set.add(bookId)
+            }
+            map[collectionName] = set
+            preferences[userCollectionsKey] = serializeCollectionsMap(map)
+        }
+    }
+
+    private fun parseCollectionsJson(jsonStr: String): Map<String, Set<String>> {
+        if (jsonStr.isBlank()) {
+            return mapOf(
+                "Yêu thích nhất" to emptySet(),
+                "Đang đọc dở" to emptySet(),
+                "Sách hay nên đọc" to emptySet()
+            )
+        }
+        return try {
+            val json = org.json.JSONObject(jsonStr)
+            val map = mutableMapOf<String, Set<String>>()
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val arr = json.optJSONArray(key)
+                val set = mutableSetOf<String>()
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        set.add(arr.optString(i))
+                    }
+                }
+                map[key] = set
+            }
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun serializeCollectionsMap(map: Map<String, Set<String>>): String {
+        val json = org.json.JSONObject()
+        for ((key, set) in map) {
+            val arr = org.json.JSONArray()
+            for (id in set) {
+                arr.put(id)
+            }
+            json.put(key, arr)
+        }
+        return json.toString()
     }
 }

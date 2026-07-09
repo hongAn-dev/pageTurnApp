@@ -1,21 +1,25 @@
 package com.pageturn.core.network
 
+import android.util.Log
+import com.pageturn.core.common.preferences.UserPreferencesDataSource
 import com.pageturn.core.model.Book
 import com.pageturn.core.model.Chapter
 import com.pageturn.core.network.api.BackendSyncService
+import kotlinx.coroutines.flow.firstOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class RetrofitPageTurnNetworkApi @Inject constructor(
-    private val syncService: BackendSyncService
+    private val syncService: BackendSyncService,
+    private val preferences: UserPreferencesDataSource
 ) : PageTurnNetworkApi {
 
     override suspend fun getRecentReads(): List<Book> {
         return try {
             val response = syncService.getLibrary()
             val libraryList = response.data ?: emptyList()
-            val remoteBooks = libraryList.map { dto ->
+            libraryList.map { dto ->
                 Book(
                     id = dto.bookHash,
                     title = dto.title,
@@ -27,41 +31,28 @@ class RetrofitPageTurnNetworkApi @Inject constructor(
                     description = dto.description ?: ""
                 )
             }
-            // Merge remote books with fake books so that the UI always has content to display
-            val fakeBooks = FakePageTurnNetworkApi().getRecentReads()
-            (remoteBooks + fakeBooks).distinctBy { it.id }
         } catch (e: Exception) {
-            FakePageTurnNetworkApi().getRecentReads()
+            emptyList()
         }
     }
 
     override suspend fun getBookDetails(bookId: String): Book {
-        try {
-            val response = syncService.getLibrary()
-            val libraryList = response.data ?: emptyList()
-            val dto = libraryList.firstOrNull { it.bookHash == bookId }
-            if (dto != null) {
-                return Book(
-                    id = dto.bookHash,
-                    title = dto.title,
-                    author = dto.author,
-                    coverUrl = dto.coverUrl ?: "",
-                    progressPercent = 0f,
-                    totalPages = 100,
-                    currentPage = 0,
-                    description = dto.description ?: ""
-                )
-            }
-        } catch (e: Exception) {
-            // ignore network error and try fallback
+        val response = syncService.getLibrary()
+        val libraryList = response.data ?: emptyList()
+        val dto = libraryList.firstOrNull { it.bookHash == bookId }
+        if (dto != null) {
+            return Book(
+                id = dto.bookHash,
+                title = dto.title,
+                author = dto.author,
+                coverUrl = dto.coverUrl ?: "",
+                progressPercent = 0f,
+                totalPages = 100,
+                currentPage = 0,
+                description = dto.description ?: ""
+            )
         }
-
-        // Fallback to fake books if not found on the server
-        return try {
-            FakePageTurnNetworkApi().getBookDetails(bookId)
-        } catch (e: Exception) {
-            throw NoSuchElementException("Book not found in library: $bookId")
-        }
+        throw NoSuchElementException("Book not found in library: $bookId")
     }
 
     override suspend fun getChapter(bookId: String, chapterNumber: Int): Chapter {
@@ -78,5 +69,40 @@ class RetrofitPageTurnNetworkApi @Inject constructor(
             """.trimIndent(),
             imageUrl = ""
         )
+    }
+
+    override suspend fun downloadBook(bookId: String): ByteArray {
+        // Read the current access token from preferences and pass explicitly
+        // OkHttp Authenticator does NOT retry @Streaming endpoints, so we must inject the token manually
+        val token = preferences.accessToken.firstOrNull() ?: ""
+        val bearerToken = if (token.isNotEmpty()) "Bearer $token" else ""
+
+        val isStoreId = bookId.all { it.isDigit() }
+        val response = if (isStoreId) {
+            syncService.downloadPublicBook(bookId.toInt(), bearerToken)
+        } else {
+            syncService.downloadBook(bookId, bearerToken)
+        }
+
+        // Log Content-Type for diagnostics (check Logcat tag "PageTurnDownload")
+        val contentType = response.headers()["Content-Type"] ?: "unknown"
+        Log.d("PageTurnDownload", "HTTP ${response.code()} | Content-Type: $contentType | bookId: $bookId | tokenEmpty: ${token.isEmpty()}")
+
+        if (response.isSuccessful) {
+            val bytes = response.body()?.bytes()
+                ?: throw Exception("Tải thất bại: Server trả về body rỗng (HTTP ${response.code()})")
+            return bytes
+        }
+
+        // Parse error body to give better diagnostic info
+        val errorBody = try { response.errorBody()?.string()?.take(300) } catch (_: Exception) { null }
+        throw Exception("Tải thất bại: HTTP ${response.code()} | CT: $contentType${if (errorBody != null) " | $errorBody" else ""}")
+    }
+
+    override suspend fun deleteCloudBook(bookId: String) {
+        val response = syncService.deleteBook(bookId, deletePhysicalFile = true)
+        if (!response.isSuccessful) {
+            throw Exception("Failed to delete book on cloud: HTTP ${response.code()}")
+        }
     }
 }

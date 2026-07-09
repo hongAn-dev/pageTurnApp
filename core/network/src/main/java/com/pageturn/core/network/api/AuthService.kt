@@ -61,34 +61,34 @@ data class UpdateProfileRequest(
 )
 
 interface AuthService {
-    @POST("api/auth/register")
+    @POST("api/v1/auth/register")
     suspend fun register(@Body request: RegisterRequest): ApiResponse<AuthResponse>
 
     @POST("api/v1/auth/login")
     suspend fun login(@Body request: LoginRequest): ApiResponse<AuthResponse>
 
-    @POST("api/auth/refresh")
+    @POST("api/v1/auth/refresh")
     suspend fun refresh(@Body request: RefreshRequest): ApiResponse<AuthResponse>
 
-    @POST("api/auth/logout")
+    @POST("api/v1/auth/logout")
     suspend fun logout(
         @Header("Authorization") token: String,
         @Body request: LogoutRequest
     )
 
-    @GET("api/auth/me")
+    @GET("api/v1/auth/me")
     suspend fun me(@Header("Authorization") token: String): UserDto
 
-    @GET("api/users/me")
+    @GET("api/v1/users/me")
     suspend fun getCurrentUser(@Header("Authorization") token: String): UserDto
 
-    @PATCH("api/users/me")
+    @PATCH("api/v1/users/me")
     suspend fun updateProfile(
         @Header("Authorization") token: String,
         @Body request: UpdateProfileRequest
     ): UserDto
 
-    @GET("api/users/search")
+    @GET("api/v1/users/search")
     suspend fun searchUser(
         @Header("Authorization") token: String,
         @Query("email") email: String

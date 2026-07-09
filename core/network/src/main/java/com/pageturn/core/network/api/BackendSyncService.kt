@@ -123,22 +123,28 @@ data class TransferDto(
 
 @Serializable
 data class PublicBookDto(
-    val id: String,
-    val bookHash: String,
+    val id: Int,
     val title: String,
-    val author: String,
+    val authors: List<String> = emptyList(),
     val description: String? = null,
     val language: String? = null,
     val category: String? = null,
+    val categoryId: Int? = null,
     val coverUrl: String? = null,
+    val fileFormat: String? = null,
+    val fileSize: Long = 0,
     val downloadCount: Int = 0
-)
+) {
+    // Convenience helpers to match existing usages
+    val author: String get() = authors.joinToString(", ")
+    val bookHash: String get() = id.toString()
+}
 
 @Serializable
 data class StoreResponse(
     val content: List<PublicBookDto>,
-    val totalElements: Int,
-    val totalPages: Int
+    val totalElements: Int = 0,
+    val totalPages: Int = 0
 )
 
 interface BackendSyncService {
@@ -264,5 +270,19 @@ interface BackendSyncService {
     ): ApiResponse<StoreResponse>
 
     @GET("api/store/{storeBookId}")
-    suspend fun getPublicBookDetail(@Path("storeBookId") storeBookId: String): ApiResponse<PublicBookDto>
+    suspend fun getPublicBookDetail(@Path("storeBookId") storeBookId: Int): ApiResponse<PublicBookDto>
+
+    @Streaming
+    @GET("api/store/{storeBookId}/download")
+    suspend fun downloadPublicBook(
+        @Path("storeBookId") storeBookId: Int,
+        @Header("Authorization") authToken: String
+    ): retrofit2.Response<okhttp3.ResponseBody>
+
+    @Streaming
+    @GET("api/library/{bookId}/download")
+    suspend fun downloadBook(
+        @Path("bookId") bookId: String,
+        @Header("Authorization") authToken: String
+    ): retrofit2.Response<okhttp3.ResponseBody>
 }

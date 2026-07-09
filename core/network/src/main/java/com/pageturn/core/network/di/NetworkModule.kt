@@ -39,7 +39,8 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(
-        preferences: UserPreferencesDataSource
+        preferences: UserPreferencesDataSource,
+        authServiceLazy: dagger.Lazy<AuthService>
     ): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
@@ -74,10 +75,52 @@ object NetworkModule {
             chain.proceed(request)
         }
 
+        val authenticator = okhttp3.Authenticator { _, response ->
+            val refreshToken = runBlocking { preferences.refreshToken.firstOrNull() }
+            if (refreshToken.isNullOrEmpty() || refreshToken == "anonymous_refresh") {
+                return@Authenticator null
+            }
+            if (response.request.url.encodedPath.contains("auth/refresh")) {
+                return@Authenticator null
+            }
+            synchronized(this) {
+                val currentToken = runBlocking { preferences.accessToken.firstOrNull() }
+                val requestHeaderToken = response.request.header("Authorization")?.removePrefix("Bearer ")
+                val newAccessToken = if (currentToken != requestHeaderToken && !currentToken.isNullOrEmpty()) {
+                    currentToken
+                } else {
+                    try {
+                        val authService = authServiceLazy.get()
+                        val refreshResponse = runBlocking { authService.refresh(com.pageturn.core.network.api.RefreshRequest(refreshToken)) }
+                        if (refreshResponse.success && refreshResponse.data != null) {
+                            val data = refreshResponse.data
+                            runBlocking {
+                                preferences.saveTokens(data.accessToken, data.refreshToken)
+                            }
+                            data.accessToken
+                        } else {
+                            null
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        null
+                    }
+                }
+                if (newAccessToken != null) {
+                    response.request.newBuilder()
+                        .header("Authorization", "Bearer $newAccessToken")
+                        .build()
+                } else {
+                    null
+                }
+            }
+        }
+
         return OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
             .addInterceptor(curlInterceptor)
             .addInterceptor(loggingInterceptor)
+            .authenticator(authenticator)
             .build()
     }
 

@@ -29,6 +29,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.pageturn.core.domain.repository.BookRepository
 
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
+
 sealed interface ReaderUiState {
     data object Loading : ReaderUiState
     data class Success(val chapter: Chapter, val bookId: String, val bookTitle: String, val bookAuthor: String) : ReaderUiState
@@ -37,7 +40,7 @@ sealed interface ReaderUiState {
 
 @HiltViewModel
 class ReaderViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val getChapterUseCase: GetChapterUseCase,
     private val updateProgressUseCase: UpdateProgressUseCase,
     private val toggleBookmarkUseCase: ToggleBookmarkUseCase,
@@ -48,11 +51,18 @@ class ReaderViewModel @Inject constructor(
     private val removeHighlightsByParagraphUseCase: RemoveHighlightsByParagraphUseCase,
     private val ttsHelper: PageTurnTtsHelper,
     private val preferencesDataSource: UserPreferencesDataSource,
-    private val bookRepository: BookRepository
+    private val bookRepository: BookRepository,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val bookId: String = checkNotNull(savedStateHandle["bookId"])
-    val initialParagraph: Int = savedStateHandle["paragraph"] ?: 0
+    val initialParagraph: Int
+        get() {
+            val fromSavedState: Int? = savedStateHandle["paragraph"]
+            if (fromSavedState != null && fromSavedState != -1) return fromSavedState
+            val sharedPrefs = context.getSharedPreferences("reader_progress", Context.MODE_PRIVATE)
+            return sharedPrefs.getInt("last_paragraph_$bookId", 0)
+        }
     private val _uiState = MutableStateFlow<ReaderUiState>(ReaderUiState.Loading)
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
 
@@ -64,8 +74,7 @@ class ReaderViewModel @Inject constructor(
         )
 
     init {
-        val initialChapter: Int = savedStateHandle["chapter"] ?: 1
-        loadChapter(initialChapter)
+        loadChapter(1)
     }
 
     fun loadChapter(chapterNumber: Int) {
@@ -99,6 +108,16 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             val progressPercent = page.toFloat() / totalPages
             updateProgressUseCase(bookId, page, progressPercent)
+        }
+    }
+
+    fun saveLastReadPosition(chapter: Int, paragraph: Int) {
+        viewModelScope.launch {
+            val sharedPrefs = context.getSharedPreferences("reader_progress", Context.MODE_PRIVATE)
+            sharedPrefs.edit()
+                .putInt("last_chapter_$bookId", chapter)
+                .putInt("last_paragraph_$bookId", paragraph)
+                .apply()
         }
     }
 

@@ -133,6 +133,7 @@ object NotificationHelper {
      * Actually posts the notification. Called from DailyReminderWorker.
      */
     fun showDailyReminderNotification(context: Context) {
+        createChannel(context)
         // Launch app on tap
         val launchIntent = context.packageManager
             .getLaunchIntentForPackage(context.packageName)

@@ -30,4 +30,7 @@ interface BookDao {
 
     @Query("SELECT * FROM books WHERE id = :bookId LIMIT 1")
     suspend fun getBookSnapshot(bookId: String): BookEntity?
+
+    @Query("DELETE FROM books")
+    suspend fun deleteAllBooks()
 }

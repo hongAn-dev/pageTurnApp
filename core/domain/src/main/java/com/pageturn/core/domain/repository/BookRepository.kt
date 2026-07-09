@@ -36,4 +36,8 @@ interface BookRepository {
     suspend fun updateProgressIfNewer(bookId: String, cloudPage: Int, cloudTotal: Int, cloudProgress: Float)
     /** Insert or update highlight by id */
     suspend fun upsertHighlight(id: String, bookId: String, chapterNumber: Int, startOffset: Int, colorHex: String, selectedText: String, noteText: String)
+    suspend fun downloadBook(bookId: String): ByteArray
+    suspend fun deleteCloudBook(bookId: String)
+    suspend fun clearAllLocalData()
 }
+

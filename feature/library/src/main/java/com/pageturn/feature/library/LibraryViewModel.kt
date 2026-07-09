@@ -24,6 +24,7 @@ import com.pageturn.core.network.api.AuthService
 import com.pageturn.core.network.api.LoginRequest
 import com.pageturn.core.network.api.RegisterRequest
 import com.pageturn.core.network.api.LogoutRequest
+import com.pageturn.core.network.api.BackendSyncService
 import kotlinx.coroutines.runBlocking
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.text.SimpleDateFormat
@@ -43,8 +44,172 @@ class LibraryViewModel @Inject constructor(
     private val getAllHighlightsUseCase: GetAllHighlightsUseCase,
     private val cloudSyncManager: CloudSyncManager,
     private val authService: AuthService,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val syncService: BackendSyncService
 ) : ViewModel() {
+
+    sealed interface DiscoverUiState {
+        data object Loading : DiscoverUiState
+        data class Success(val popular: List<com.pageturn.core.network.api.PublicBookDto>, val recommended: List<com.pageturn.core.network.api.PublicBookDto>) : DiscoverUiState
+        data class Error(val message: String) : DiscoverUiState
+    }
+
+    private val _discoverUiState = MutableStateFlow<DiscoverUiState>(DiscoverUiState.Success(emptyList(), emptyList()))
+    val discoverUiState: StateFlow<DiscoverUiState> = _discoverUiState.asStateFlow()
+
+    private val _downloadingBookIds = MutableStateFlow<Set<String>>(emptySet())
+    val downloadingBookIds: StateFlow<Set<String>> = _downloadingBookIds.asStateFlow()
+
+    fun loadStoreBooks(category: String? = null, query: String? = null) {
+        viewModelScope.launch {
+            _discoverUiState.value = DiscoverUiState.Loading
+            try {
+                val apiCategory = if (category == "Tất cả" || category == "All") null else category
+                val response = syncService.listPublicBooks(page = 0, size = 20, category = apiCategory, query = query)
+                val bookList = response.data?.content ?: emptyList()
+                // Split popular and recommended simply for design layout
+                val half = bookList.size / 2
+                val popular = bookList.take(half)
+                val recommended = bookList.drop(half)
+                _discoverUiState.value = DiscoverUiState.Success(popular, recommended)
+            } catch (e: Exception) {
+                _discoverUiState.value = DiscoverUiState.Error(e.localizedMessage ?: "Không thể tải sách từ Store")
+            }
+        }
+    }
+
+    val userCollections: StateFlow<Map<String, Set<String>>> = userPreferencesDataSource.userCollections
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyMap()
+        )
+
+    fun createCollection(name: String) {
+        viewModelScope.launch {
+            userPreferencesDataSource.createCollection(name)
+        }
+    }
+
+    fun deleteCollection(name: String) {
+        viewModelScope.launch {
+            userPreferencesDataSource.deleteCollection(name)
+        }
+    }
+
+    fun toggleBookInCollection(collectionName: String, bookId: String) {
+        viewModelScope.launch {
+            userPreferencesDataSource.toggleBookInCollection(collectionName, bookId)
+        }
+    }
+
+    fun renameCollection(oldName: String, newName: String) {
+        viewModelScope.launch {
+            val current = userPreferencesDataSource.userCollections.firstOrNull() ?: return@launch
+            val bookIds = current[oldName] ?: emptySet()
+            userPreferencesDataSource.deleteCollection(oldName)
+            userPreferencesDataSource.createCollection(newName)
+            bookIds.forEach { bookId ->
+                userPreferencesDataSource.toggleBookInCollection(newName, bookId)
+            }
+        }
+    }
+
+    fun downloadBook(bookId: String, title: String, author: String, coverUrl: String, description: String, storeBookId: String? = null) {
+        viewModelScope.launch {
+            val downloadId = storeBookId ?: bookId
+            _downloadingBookIds.update { it + downloadId }
+            try {
+                val bytes = bookRepository.downloadBook(downloadId)
+
+                // Validate ZIP/EPUB magic bytes: PK\x03\x04
+                val isEpub = bytes.size >= 4 &&
+                    bytes[0] == 0x50.toByte() &&
+                    bytes[1] == 0x4B.toByte() &&
+                    bytes[2] == 0x03.toByte() &&
+                    bytes[3] == 0x04.toByte()
+
+                // Validate PDF magic bytes: %PDF
+                val isPdf = bytes.size >= 4 &&
+                    bytes[0] == 0x25.toByte() && bytes[1] == 0x50.toByte() && // %P
+                    bytes[2] == 0x44.toByte() && bytes[3] == 0x46.toByte()    // DF
+
+                if (!isEpub && !isPdf) {
+                    val preview = bytes.take(200).toByteArray().toString(Charsets.UTF_8).take(100)
+                    throw Exception("Server trả về dữ liệu không phải EPUB hoặc PDF: $preview")
+                }
+
+                // Xóa file cũ hỏng nếu tồn tại
+                val destination = java.io.File(context.filesDir, bookId)
+                destination.mkdirs()
+                
+                val fileName = if (isPdf) "book.pdf" else "book.epub"
+                val file = java.io.File(destination, fileName)
+                
+                java.io.File(destination, "book.epub").let { if (it.exists()) it.delete() }
+                java.io.File(destination, "book.pdf").let { if (it.exists()) it.delete() }
+
+                file.writeBytes(bytes)
+
+                var finalTotalPages = 100
+                if (isPdf) {
+                    try {
+                        val pfd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                        val renderer = android.graphics.pdf.PdfRenderer(pfd)
+                        finalTotalPages = renderer.pageCount
+                        renderer.close()
+                        pfd.close()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                // Save it into local DB
+                bookRepository.addLocalBook(
+                    Book(
+                        id = bookId,
+                        title = title,
+                        author = author.ifBlank { "Tác giả ẩn danh" },
+                        coverUrl = coverUrl,
+                        progressPercent = 0.0f,
+                        totalPages = finalTotalPages,
+                        currentPage = 0,
+                        description = description.ifBlank { "Đã tải từ server" }
+                    )
+                )
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "Đã tải sách \"$title\" thành công!", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    val msg = e.localizedMessage ?: "Lỗi kết nối"
+                    val displayMsg = when {
+                        msg.contains("401") ->
+                            "Phiên đăng nhập hết hạn. Vui lòng đăng xuất và đăng nhập lại!"
+                        msg.contains("không phải EPUB/PDF") ->
+                            "Tải thất bại: File từ server không hợp lệ (401/403 hoặc lỗi server)."
+                        else -> "Lỗi tải sách: $msg"
+                    }
+                    android.widget.Toast.makeText(context, displayMsg, android.widget.Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                _downloadingBookIds.update { it - downloadId }
+            }
+        }
+    }
+
+    fun deleteCloudBook(bookId: String) {
+        viewModelScope.launch {
+            try {
+                bookRepository.deleteCloudBook(bookId)
+                // also delete locally
+                bookRepository.deleteLocalBook(bookId)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     // --- Authentication States ---
     sealed interface AuthUiState {
@@ -289,6 +454,24 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    fun setFontSize(size: Int) {
+        viewModelScope.launch {
+            userPreferencesDataSource.setFontSize(size)
+        }
+    }
+
+    fun setFontFamily(family: String) {
+        viewModelScope.launch {
+            userPreferencesDataSource.setFontFamily(family)
+        }
+    }
+
+    fun setReadingTheme(theme: String) {
+        viewModelScope.launch {
+            userPreferencesDataSource.setReadingTheme(theme)
+        }
+    }
+
     fun signInWithEmail(email: String, password: String) {
         viewModelScope.launch {
             _authUiState.value = AuthUiState.Loading
@@ -406,4 +589,51 @@ class LibraryViewModel @Inject constructor(
              }
          }
      }
+
+    fun exportHighlightsAsTxt(onExportReady: (String) -> Unit) {
+        viewModelScope.launch {
+            val list = bookRepository.getAllHighlightsSnapshot()
+            val sb = StringBuilder()
+            sb.append("PageTurn Highlights & Notes Export\n")
+            sb.append("==================================\n")
+            val format = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+            sb.append("Xuất ngày: $format\n\n")
+            
+            if (list.isEmpty()) {
+                sb.append("(Không có ghi chú hoặc highlight nào để xuất)\n")
+            } else {
+                list.forEachIndexed { index, hl ->
+                    sb.append("${index + 1}. ")
+                    sb.append("Sách ID: ${hl.bookId}\n")
+                    sb.append("   Đoạn văn trích dẫn: \"${hl.selectedText ?: ""}\"\n")
+                    if (hl.noteText?.isNotBlank() == true) {
+                        sb.append("   Ghi chú: ${hl.noteText}\n")
+                    }
+                    sb.append("----------------------------------\n")
+                }
+            }
+            onExportReady(sb.toString())
+        }
+    }
+
+    fun exportHighlightsAsJson(onExportReady: (String) -> Unit) {
+        viewModelScope.launch {
+            val list = bookRepository.getAllHighlightsSnapshot()
+            val sb = StringBuilder()
+            sb.append("[\n")
+            list.forEachIndexed { index, hl ->
+                sb.append("  {\n")
+                sb.append("    \"id\": \"${hl.id.replace("\"", "\\\"").replace("\n", "\\n")}\",\n")
+                sb.append("    \"bookId\": \"${hl.bookId.replace("\"", "\\\"").replace("\n", "\\n")}\",\n")
+                sb.append("    \"chapterNumber\": ${hl.chapterNumber},\n")
+                sb.append("    \"selectedText\": \"${(hl.selectedText ?: "").replace("\"", "\\\"").replace("\n", "\\n")}\",\n")
+                sb.append("    \"noteText\": \"${(hl.noteText ?: "").replace("\"", "\\\"").replace("\n", "\\n")}\"\n")
+                sb.append("  }")
+                if (index < list.size - 1) sb.append(",")
+                sb.append("\n")
+            }
+            sb.append("]")
+            onExportReady(sb.toString())
+        }
+    }
 }

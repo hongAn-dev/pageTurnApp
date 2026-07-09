@@ -27,6 +27,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Hide system status and navigation bars to prevent covering bottom navigation bar
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+        }
         setContent {
             val settingsState = preferencesDataSource.userSettings.collectAsState(
                 initial = UserSettings(16, "serif", "light")
@@ -53,7 +63,7 @@ class MainActivity : ComponentActivity() {
                     composable("library") {
                         LibraryScreen(
                             onBookClick = { bookId ->
-                                navController.navigate("reader/$bookId")
+                                navController.navigate("reader/$bookId?chapter=-1&paragraph=-1")
                             },
                             onSignOut = {
                                 navController.navigate("auth") {

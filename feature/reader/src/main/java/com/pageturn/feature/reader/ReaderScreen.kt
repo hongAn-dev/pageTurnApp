@@ -61,6 +61,13 @@ import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -731,8 +738,39 @@ fun ReaderScreen(
                 }
             }
             is ReaderUiState.Error -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = state.message, color = Color.Red)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        Text(
+                            text = "Thông báo",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = currentTextColor
+                        )
+                        Text(
+                            text = state.message,
+                            color = Color.Red,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = onBackClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = currentButtonContainerColor,
+                                contentColor = currentButtonContentColor
+                            )
+                        ) {
+                            Text("Quay lại Thư viện")
+                        }
+                    }
                 }
             }
             is ReaderUiState.Success -> {
@@ -740,46 +778,196 @@ fun ReaderScreen(
                 val highlights by viewModel.getHighlights(state.chapter.chapterNumber).collectAsState(initial = emptyList())
 
                 // Dynamic Pagination: PDF = 1 image per page, text = character budget pagination
+                val isDirectPdf = state.chapter.content.startsWith("[pdf_file: ") && state.chapter.content.endsWith("]")
+                val pdfFilePath = if (isDirectPdf) state.chapter.content.substringAfter("[pdf_file: ").substringBefore("]") else null
+                
+                val pdfRenderer = remember(pdfFilePath) {
+                    if (pdfFilePath != null) {
+                        try {
+                            val file = java.io.File(pdfFilePath)
+                            val pfd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                            android.graphics.pdf.PdfRenderer(pfd)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    } else null
+                }
+                
+                DisposableEffect(pdfRenderer) {
+                    onDispose {
+                        try { pdfRenderer?.close() } catch (e: Exception) {}
+                    }
+                }
+
                 val paragraphs = state.chapter.content.split("\n\n")
-                val isPdfContent = paragraphs.any { it.startsWith("[page_image:") && it.endsWith("]") }
+                val isPdfContent = !isDirectPdf && paragraphs.any { it.startsWith("[page_image:") && it.endsWith("]") }
                 val pdfParagraphs = if (isPdfContent)
                     paragraphs.filter { it.startsWith("[page_image:") && it.endsWith("]") }
                 else emptyList()
 
-                val paginatedTextPages = remember(state.chapter.content, settings.fontSizeSp) {
-                    if (isPdfContent) emptyList() else paginateText(state.chapter.content, settings.fontSizeSp)
+                val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+                val screenWidthDp = configuration.screenWidthDp
+                val screenHeightDp = configuration.screenHeightDp
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+
+                val textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = settings.fontSizeSp.sp,
+                    fontFamily = currentFontFamily
+                )
+
+                val availableWidthDp = screenWidthDp.dp - 32.dp
+                val availableHeightDp = (screenHeightDp.dp - 
+                    innerPadding.calculateTopPadding() - 
+                    innerPadding.calculateBottomPadding() - 
+                    44.dp - 
+                    48.dp - 
+                    88.dp).coerceAtLeast(200.dp)
+
+                var paginatedTextPages by remember { mutableStateOf<List<List<PageParagraph>>>(emptyList()) }
+                var isPaginating by remember { mutableStateOf(false) }
+                var hasScrolledToTarget by remember { mutableStateOf(false) }
+
+                LaunchedEffect(state.chapter.id) {
+                    hasScrolledToTarget = false
                 }
 
-                val totalPages = if (isPdfContent) pdfParagraphs.size else paginatedTextPages.size
+                LaunchedEffect(state.chapter.content, textStyle, availableWidthDp, availableHeightDp) {
+                    if (isPdfContent || isDirectPdf) {
+                        paginatedTextPages = emptyList()
+                    } else {
+                        isPaginating = true
+                        paginatedTextPages = emptyList()
+                        val content = state.chapter.content
+                        val availHPx = availableHeightDp.value * density.density
+                        val availWPx = availableWidthDp.value * density.density
+                        val fontSizePx = textStyle.fontSize.value * density.density * density.fontScale
+                        val maxLinesApprox = (availHPx / (fontSizePx * 1.45f)).toInt().coerceAtLeast(5)
+                        val charsPerLineApprox = (availWPx / (fontSizePx * 0.55f)).toInt().coerceAtLeast(10)
+                        val safeBudget = (maxLinesApprox * charsPerLineApprox * 0.85f).toInt().coerceAtLeast(20)
+
+                        // Estimate total pages for progress indication
+                        val cleanLen = content.length
+                        val estimatedPages = (cleanLen / safeBudget.toFloat()).toInt().coerceAtLeast(1)
+
+                        val FIRST_BATCH = 10
+                        val BATCH_SIZE = 30
+
+                        // Paginate first batch on Default dispatcher
+                        val firstBatch = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            paginateTextRange(
+                                content = content,
+                                textStyle = textStyle,
+                                screenWidthDp = availableWidthDp,
+                                screenHeightDp = availableHeightDp,
+                                textMeasurer = textMeasurer,
+                                density = density,
+                                maxPages = FIRST_BATCH
+                            )
+                        }
+                        paginatedTextPages = firstBatch.first
+                        var resumeIdx = firstBatch.second
+
+                        if (resumeIdx < cleanLen) {
+                            // Continue paginating rest in background batches
+                            while (resumeIdx < cleanLen && kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.isActive != false) {
+                                val batch = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                    paginateTextRange(
+                                        content = content,
+                                        textStyle = textStyle,
+                                        screenWidthDp = availableWidthDp,
+                                        screenHeightDp = availableHeightDp,
+                                        textMeasurer = textMeasurer,
+                                        density = density,
+                                        maxPages = BATCH_SIZE,
+                                        startCharIdx = resumeIdx
+                                    )
+                                }
+                                paginatedTextPages = paginatedTextPages + batch.first
+                                resumeIdx = batch.second
+                                // Yield to let UI render
+                                kotlinx.coroutines.yield()
+                            }
+                        }
+                        isPaginating = false
+                    }
+                }
+
+                val totalPages = if (isDirectPdf) pdfRenderer?.pageCount ?: 0
+                                 else if (isPdfContent) pdfParagraphs.size 
+                                 else paginatedTextPages.size
 
                 val initialParagraph = viewModel.initialParagraph
-                val targetPage = if (isPdfContent) {
-                    initialParagraph
-                } else {
-                    val pageIdx = paginatedTextPages.indexOfFirst { pageList ->
-                        pageList.any { it.absoluteIndex == initialParagraph }
-                    }
-                    if (pageIdx != -1) pageIdx else 0
-                }
-                val pagerState = rememberPagerState(initialPage = targetPage.coerceIn(0, totalPages - 1)) { totalPages }
-
-                var isFirstLoad by remember { mutableStateOf(true) }
-                // Reset page when a new chapter loads
-                LaunchedEffect(state.chapter.id) {
-                    if (isFirstLoad) {
-                        isFirstLoad = false
-                        pagerState.scrollToPage(targetPage.coerceIn(0, totalPages - 1))
+                val targetPage = remember(paginatedTextPages, initialParagraph) {
+                    if (isPdfContent || isDirectPdf) {
+                        initialParagraph
                     } else {
-                        pagerState.scrollToPage(0)
+                        val targetOffset = if (initialParagraph < 150) {
+                            val cleanContent = if (state.chapter.content.firstOrNull()?.isDigit() == true && state.chapter.content.contains("\n")) {
+                                val lines = state.chapter.content.split("\n")
+                                if (lines.firstOrNull()?.trim()?.toIntOrNull() != null) {
+                                    lines.drop(1).joinToString("\n")
+                                } else {
+                                    state.chapter.content
+                                }
+                            } else {
+                                state.chapter.content
+                            }
+                            val paras = cleanContent.split("\n\n")
+                            paras.take(initialParagraph).sumOf { it.length + 2 }
+                        } else {
+                            initialParagraph
+                        }
+                        val pageIdx = paginatedTextPages.indexOfLast { pageList ->
+                            pageList.any { it.absoluteIndex <= targetOffset }
+                        }
+                        if (pageIdx != -1) pageIdx else 0
                     }
                 }
 
-                // Sync current page changes back to progress
-                LaunchedEffect(pagerState.currentPage) {
-                    viewModel.updateProgress(pagerState.currentPage + 1, totalPages)
+                val pagerState = rememberPagerState(initialPage = 0) { totalPages }
+
+                LaunchedEffect(paginatedTextPages, hasScrolledToTarget, isPaginating) {
+                    if (!isPaginating && totalPages > 0 && !hasScrolledToTarget) {
+                        pagerState.scrollToPage(targetPage.coerceIn(0, totalPages - 1))
+                        hasScrolledToTarget = true
+                    }
+                }
+
+                LaunchedEffect(pagerState.currentPage, totalPages, isPaginating) {
+                    if (!isPaginating && totalPages > 0) {
+                        viewModel.updateProgress(pagerState.currentPage + 1, totalPages)
+                        
+                        val paragraphIndex = if (isPdfContent || isDirectPdf) {
+                            pagerState.currentPage
+                        } else {
+                            paginatedTextPages.getOrNull(pagerState.currentPage)?.firstOrNull()?.absoluteIndex ?: 0
+                        }
+                        viewModel.saveLastReadPosition(state.chapter.chapterNumber, paragraphIndex)
+                    }
                 }
 
                 var lastScaleTime by remember { mutableStateOf(0L) }
+                if (isPaginating) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(currentBgColor),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            CircularProgressIndicator(color = currentIconTint)
+                            Text(
+                                text = "Đang chuẩn bị trang sách...",
+                                color = currentTextColor,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                } else {
                 Scaffold(
                     modifier = Modifier.padding(innerPadding),
                     topBar = {
@@ -916,6 +1104,8 @@ fun ReaderScreen(
                                 color = currentIconTint,
                                 trackColor = currentIconTint.copy(alpha = 0.2f)
                             )
+
+
 
                             Row(
                                 modifier = Modifier
@@ -1110,8 +1300,19 @@ fun ReaderScreen(
                     },
                     containerColor = currentBgColor
                 ) { subPadding ->
-                    HorizontalPager(
-                        state = pagerState,
+                    if (isPaginating && paginatedTextPages.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(subPadding)
+                                .background(currentBgColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = currentIconTint)
+                        }
+                    } else {
+                        HorizontalPager(
+                            state = pagerState,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(subPadding)
@@ -1146,7 +1347,7 @@ fun ReaderScreen(
                                 showControlMenu = !showControlMenu
                             }
                     ) { page ->
-                        val paddingModifier = if (isPdfContent) {
+                        val paddingModifier = if (isPdfContent || isDirectPdf) {
                             Modifier.padding(0.dp)
                         } else {
                             Modifier.padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 48.dp)
@@ -1157,7 +1358,70 @@ fun ReaderScreen(
                                 .then(paddingModifier)
                                 .clickable { showControlMenu = !showControlMenu }
                         ) {
-                            if (isPdfContent) {
+                            if (isDirectPdf && pdfRenderer != null) {
+                                val bitmap = remember(page, pdfRenderer) {
+                                    try {
+                                        val pdfPage = pdfRenderer.openPage(page)
+                                        // Use display metrics for better scaling
+                                        val density = context.resources.displayMetrics.density
+                                        val width = (pdfPage.width * density * 1.5f).toInt()
+                                        val height = (pdfPage.height * density * 1.5f).toInt()
+                                        val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                                        bmp.eraseColor(android.graphics.Color.WHITE) // Background white for PDF
+                                        pdfPage.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        pdfPage.close()
+                                        bmp.asImageBitmap()
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+                                }
+                                if (bitmap != null) {
+                                    var scale by remember { mutableStateOf(1f) }
+                                    var offset by remember { mutableStateOf(Offset.Zero) }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(0.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Image(
+                                            bitmap = bitmap,
+                                            contentDescription = "PDF Page $page",
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer(
+                                                    scaleX = scale,
+                                                    scaleY = scale,
+                                                    translationX = offset.x,
+                                                    translationY = offset.y,
+                                                    clip = true
+                                                )
+                                                .pointerInput(Unit) {
+                                                    awaitEachGesture {
+                                                        val down = awaitFirstDown()
+                                                        do {
+                                                            val event = awaitPointerEvent()
+                                                            val canceled = event.changes.any { it.isConsumed }
+                                                            if (!canceled) {
+                                                                val zoomChange = event.calculateZoom()
+                                                                val panChange = event.calculatePan()
+                                                                
+                                                                scale = (scale * zoomChange).coerceIn(1f, 4f)
+                                                                if (scale > 1f) {
+                                                                    offset = offset + panChange
+                                                                    event.changes.forEach { it.consume() }
+                                                                } else {
+                                                                    offset = Offset.Zero
+                                                                }
+                                                            }
+                                                        } while (!canceled && event.changes.any { it.pressed })
+                                                    }
+                                                },
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                }
+                            } else if (isPdfContent) {
                                 val paragraph = pdfParagraphs.getOrNull(page) ?: ""
                                 if (paragraph.startsWith("[page_image:") && paragraph.endsWith("]")) {
                                     val imagePath = paragraph.substringAfter("[page_image: ").substringBefore("]")
@@ -1328,7 +1592,7 @@ fun ReaderScreen(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .clip(RoundedCornerShape(4.dp))
-                                                        .padding(vertical = 4.dp, horizontal = 8.dp)
+                                                        .padding(vertical = 1.dp, horizontal = 8.dp)
                                                 ) {
                                                     Row(
                                                         modifier = Modifier.fillMaxWidth(),
@@ -1357,7 +1621,7 @@ fun ReaderScreen(
                                                     }
                                                 }
                                             }
-                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Spacer(modifier = Modifier.height(6.dp))
                                         }
                                     }
                                 }
@@ -1367,7 +1631,7 @@ fun ReaderScreen(
                             Spacer(modifier = Modifier.weight(1f))
 
                             // Footer Page Info badge: only show for PDF content (text already has bottom bar)
-                            if (isPdfContent) {
+                            if (isPdfContent || isDirectPdf) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1389,6 +1653,8 @@ fun ReaderScreen(
                             }
                         }
                     }
+                }
+                }
                 }
             }
         }
@@ -1548,69 +1814,250 @@ data class PageParagraph(
     val text: String
 )
 
-fun paginateText(content: String, fontSizeSp: Int): List<List<PageParagraph>> {
+fun paginateText(
+    content: String,
+    textStyle: androidx.compose.ui.text.TextStyle,
+    screenWidthDp: androidx.compose.ui.unit.Dp,
+    screenHeightDp: androidx.compose.ui.unit.Dp,
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    density: androidx.compose.ui.unit.Density
+): List<List<PageParagraph>> {
     val pages = mutableListOf<List<PageParagraph>>()
-    // Non-linear budget scaling with font size to guarantee no overflow at large sizes
-    val budget = ((10 * 1000) / (fontSizeSp - 3)).coerceIn(250, 900)
-    
-    val rawParagraphs = content.split("\n\n")
-    val paragraphs = if (rawParagraphs.firstOrNull()?.trim()?.toIntOrNull() != null) {
-        rawParagraphs.drop(1)
-    } else {
-        rawParagraphs
-    }
-    
-    var currentPage = mutableListOf<PageParagraph>()
-    var currentPageLength = 0
-    
-    paragraphs.forEachIndexed { index, para ->
-        val trimmedPara = para.trim()
-        if (trimmedPara.isEmpty()) return@forEachIndexed
-        
-        // If the paragraph fits fully on the current page, add it
-        if (currentPageLength + trimmedPara.length <= budget) {
-            currentPage.add(PageParagraph(index, trimmedPara))
-            currentPageLength += trimmedPara.length
+
+    // Convert exact Dp dimensions to pixels using direct mathematical calculation
+    val availableHeightPx = screenHeightDp.value * density.density
+    val availableWidthPx = screenWidthDp.value * density.density
+
+    val cleanContent = if (content.firstOrNull()?.isDigit() == true && content.contains("\n")) {
+        val lines = content.split("\n")
+        if (lines.firstOrNull()?.trim()?.toIntOrNull() != null) {
+            lines.drop(1).joinToString("\n")
         } else {
-            // Otherwise, split the paragraph into sentences and distribute them
-            val sentences = trimmedPara.split(Regex("(?<=\\.)\\s+"))
-            var sentenceChunk = java.lang.StringBuilder()
-            
-            for (sentence in sentences) {
-                val sentenceTrimmed = sentence.trim()
-                if (sentenceTrimmed.isEmpty()) continue
-                
-                // Check if adding this sentence to the current chunk exceeds the budget
-                if (currentPageLength + sentenceChunk.length + sentenceTrimmed.length > budget) {
-                    // Push the current chunk if it exists
-                    if (sentenceChunk.isNotEmpty()) {
-                        currentPage.add(PageParagraph(index, sentenceChunk.toString().trim()))
-                    }
-                    // Push page
-                    if (currentPage.isNotEmpty()) {
-                        pages.add(currentPage)
-                    }
-                    currentPage = mutableListOf()
-                    currentPageLength = 0
-                    sentenceChunk = java.lang.StringBuilder()
+            content
+        }
+    } else {
+        content
+    }
+
+    val totalLength = cleanContent.length
+    if (totalLength == 0) return pages
+
+    var startIdx = 0
+
+    // Approximate budget limit using the real TextStyle's font size converted directly to pixels
+    val fontSizePx = textStyle.fontSize.value * density.density * density.fontScale
+    val maxLinesApprox = (availableHeightPx / (fontSizePx * 1.45f)).toInt().coerceAtLeast(5)
+    val charsPerLineApprox = (availableWidthPx / (fontSizePx * 0.55f)).toInt().coerceAtLeast(10)
+    val budgetApprox = maxLinesApprox * charsPerLineApprox
+
+    val constraints = androidx.compose.ui.unit.Constraints(
+        maxWidth = availableWidthPx.toInt()
+    )
+
+    // Use a conservative budget (85% of estimate) to minimize overflow adjustments
+    val safeBudget = (budgetApprox * 0.85f).toInt().coerceAtLeast(20)
+
+    while (startIdx < totalLength) {
+        // Step 1: Take a chunk at the safe budget estimate
+        var endGuess = (startIdx + safeBudget).coerceAtMost(totalLength)
+
+        // Step 2: Snap to word/line boundary
+        if (endGuess < totalLength) {
+            val scanLimit = (endGuess - (safeBudget * 0.25f).toInt()).coerceAtLeast(startIdx + 1)
+            for (i in endGuess downTo scanLimit) {
+                if (cleanContent[i] == ' ' || cleanContent[i] == '\n') {
+                    endGuess = i
+                    break
                 }
-                
-                if (sentenceChunk.isNotEmpty()) {
-                    sentenceChunk.append(" ")
-                }
-                sentenceChunk.append(sentenceTrimmed)
-            }
-            
-            if (sentenceChunk.isNotEmpty()) {
-                currentPage.add(PageParagraph(index, sentenceChunk.toString().trim()))
-                currentPageLength += sentenceChunk.length
             }
         }
+
+        // Step 3: Single measure to verify fit
+        val chunk = cleanContent.substring(startIdx, endGuess)
+        val layoutResult = textMeasurer.measure(
+            text = chunk,
+            style = textStyle,
+            constraints = constraints
+        )
+
+        var endIdx = endGuess
+        if (layoutResult.size.height > availableHeightPx) {
+            // Text overflowed – shrink by ratio of overflow
+            val ratio = availableHeightPx / layoutResult.size.height.toFloat()
+            val shrunkLen = ((endGuess - startIdx) * ratio * 0.92f).toInt().coerceAtLeast(1)
+            endIdx = (startIdx + shrunkLen).coerceAtMost(totalLength)
+            // Re-snap to word boundary
+            if (endIdx < totalLength && endIdx > startIdx + 1) {
+                val scanLim = (endIdx - (shrunkLen * 0.2f).toInt()).coerceAtLeast(startIdx + 1)
+                for (i in endIdx downTo scanLim) {
+                    if (cleanContent[i] == ' ' || cleanContent[i] == '\n') {
+                        endIdx = i
+                        break
+                    }
+                }
+            }
+        } else if (layoutResult.size.height < availableHeightPx * 0.75f && endGuess < totalLength) {
+            // Under-filled – try to fit more text
+            val remainingHeight = availableHeightPx - layoutResult.size.height
+            val extraChars = ((remainingHeight / availableHeightPx) * safeBudget).toInt()
+            val extendedEnd = (endGuess + extraChars).coerceAtMost(totalLength)
+            // Snap extended to word boundary
+            var snappedExtend = extendedEnd
+            if (snappedExtend < totalLength) {
+                for (i in snappedExtend downTo endGuess) {
+                    if (cleanContent[i] == ' ' || cleanContent[i] == '\n') {
+                        snappedExtend = i
+                        break
+                    }
+                }
+            }
+            // Verify extended chunk fits
+            val extChunk = cleanContent.substring(startIdx, snappedExtend)
+            val extLayout = textMeasurer.measure(text = extChunk, style = textStyle, constraints = constraints)
+            if (extLayout.size.height <= availableHeightPx) {
+                endIdx = snappedExtend
+            }
+            // else keep original endIdx = endGuess
+        }
+
+        if (endIdx <= startIdx) {
+            endIdx = (startIdx + 1).coerceAtMost(totalLength)
+        }
+
+        val pageText = cleanContent.substring(startIdx, endIdx).trim()
+        if (pageText.isNotEmpty()) {
+            pages.add(listOf(PageParagraph(startIdx, pageText)))
+        }
+
+        startIdx = endIdx
+        while (startIdx < totalLength && (cleanContent[startIdx] == ' ' || cleanContent[startIdx] == '\n')) {
+            startIdx++
+        }
     }
-    
-    if (currentPage.isNotEmpty()) {
-        pages.add(currentPage)
-    }
-    
+
     return pages
+}
+
+/**
+ * Paginate a limited number of pages from a given character index.
+ * Returns Pair(pages, resumeCharIdx) where resumeCharIdx is the char index to continue from.
+ */
+fun paginateTextRange(
+    content: String,
+    textStyle: androidx.compose.ui.text.TextStyle,
+    screenWidthDp: androidx.compose.ui.unit.Dp,
+    screenHeightDp: androidx.compose.ui.unit.Dp,
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    density: androidx.compose.ui.unit.Density,
+    maxPages: Int = Int.MAX_VALUE,
+    startCharIdx: Int = 0
+): Pair<List<List<PageParagraph>>, Int> {
+    val pages = mutableListOf<List<PageParagraph>>()
+
+    val availableHeightPx = screenHeightDp.value * density.density
+    val availableWidthPx = screenWidthDp.value * density.density
+
+    val cleanContent = if (startCharIdx == 0 && content.firstOrNull()?.isDigit() == true && content.contains("\n")) {
+        val lines = content.split("\n")
+        if (lines.firstOrNull()?.trim()?.toIntOrNull() != null) {
+            lines.drop(1).joinToString("\n")
+        } else {
+            content
+        }
+    } else {
+        content
+    }
+
+    val totalLength = cleanContent.length
+    if (totalLength == 0) return Pair(pages, totalLength)
+
+    var startIdx = startCharIdx.coerceIn(0, totalLength)
+
+    val fontSizePx = textStyle.fontSize.value * density.density * density.fontScale
+    val maxLinesApprox = (availableHeightPx / (fontSizePx * 1.45f)).toInt().coerceAtLeast(5)
+    val charsPerLineApprox = (availableWidthPx / (fontSizePx * 0.55f)).toInt().coerceAtLeast(10)
+    val budgetApprox = maxLinesApprox * charsPerLineApprox
+    val safeBudget = (budgetApprox * 0.85f).toInt().coerceAtLeast(20)
+
+    val constraints = androidx.compose.ui.unit.Constraints(
+        maxWidth = availableWidthPx.toInt()
+    )
+
+    // Skip leading whitespace at start
+    while (startIdx < totalLength && (cleanContent[startIdx] == ' ' || cleanContent[startIdx] == '\n')) {
+        startIdx++
+    }
+
+    var pageCount = 0
+    while (startIdx < totalLength && pageCount < maxPages) {
+        var endGuess = (startIdx + safeBudget).coerceAtMost(totalLength)
+
+        if (endGuess < totalLength) {
+            val scanLimit = (endGuess - (safeBudget * 0.25f).toInt()).coerceAtLeast(startIdx + 1)
+            for (i in endGuess downTo scanLimit) {
+                if (cleanContent[i] == ' ' || cleanContent[i] == '\n') {
+                    endGuess = i
+                    break
+                }
+            }
+        }
+
+        val chunk = cleanContent.substring(startIdx, endGuess)
+        val layoutResult = textMeasurer.measure(
+            text = chunk,
+            style = textStyle,
+            constraints = constraints
+        )
+
+        var endIdx = endGuess
+        if (layoutResult.size.height > availableHeightPx) {
+            val ratio = availableHeightPx / layoutResult.size.height.toFloat()
+            val shrunkLen = ((endGuess - startIdx) * ratio * 0.92f).toInt().coerceAtLeast(1)
+            endIdx = (startIdx + shrunkLen).coerceAtMost(totalLength)
+            if (endIdx < totalLength && endIdx > startIdx + 1) {
+                val scanLim = (endIdx - (shrunkLen * 0.2f).toInt()).coerceAtLeast(startIdx + 1)
+                for (i in endIdx downTo scanLim) {
+                    if (cleanContent[i] == ' ' || cleanContent[i] == '\n') {
+                        endIdx = i
+                        break
+                    }
+                }
+            }
+        } else if (layoutResult.size.height < availableHeightPx * 0.75f && endGuess < totalLength) {
+            val remainingHeight = availableHeightPx - layoutResult.size.height
+            val extraChars = ((remainingHeight / availableHeightPx) * safeBudget).toInt()
+            val extendedEnd = (endGuess + extraChars).coerceAtMost(totalLength)
+            var snappedExtend = extendedEnd
+            if (snappedExtend < totalLength) {
+                for (i in snappedExtend downTo endGuess) {
+                    if (cleanContent[i] == ' ' || cleanContent[i] == '\n') {
+                        snappedExtend = i
+                        break
+                    }
+                }
+            }
+            val extChunk = cleanContent.substring(startIdx, snappedExtend)
+            val extLayout = textMeasurer.measure(text = extChunk, style = textStyle, constraints = constraints)
+            if (extLayout.size.height <= availableHeightPx) {
+                endIdx = snappedExtend
+            }
+        }
+
+        if (endIdx <= startIdx) {
+            endIdx = (startIdx + 1).coerceAtMost(totalLength)
+        }
+
+        val pageText = cleanContent.substring(startIdx, endIdx).trim()
+        if (pageText.isNotEmpty()) {
+            pages.add(listOf(PageParagraph(startIdx, pageText)))
+            pageCount++
+        }
+
+        startIdx = endIdx
+        while (startIdx < totalLength && (cleanContent[startIdx] == ' ' || cleanContent[startIdx] == '\n')) {
+            startIdx++
+        }
+    }
+
+    return Pair(pages, startIdx)
 }
